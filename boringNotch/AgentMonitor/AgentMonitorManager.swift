@@ -8,6 +8,7 @@
 //  `.shared` singleton).
 //
 
+import Defaults
 import Foundation
 import SwiftUI
 import os
@@ -30,12 +31,9 @@ final class AgentMonitorManager: ObservableObject {
   private var started = false
   private var maintenanceTimer: Timer?
 
-  /// A `working` session with no tool in flight and no activity for this long
-  /// is parked at the prompt awaiting the user → demote it to `waiting`.
-  private let idleThreshold: TimeInterval = 60
-
   /// Drop idle (`waiting`/`done`) sessions after this long with no activity —
-  /// a safety net for sessions that never send a `session_end`.
+  /// a safety net for sessions that never send a `session_end`. (The idle and
+  /// stall thresholds are user-configurable; see `Defaults.Keys`.)
   private let idleTTL: TimeInterval = 30 * 60
 
   private init() {}
@@ -57,10 +55,14 @@ final class AgentMonitorManager: ObservableObject {
 
   // MARK: - Lifecycle
 
-  /// Start the loopback listener. Idempotent.
-  func start(port: UInt16 = 7878) {
+  /// Start the loopback listener. Idempotent. No-op when disabled in settings.
+  func start() {
+    guard Defaults[.agentMonitorEnabled] else { return }
     guard !started else { return }
     started = true
+    AgentNotificationManager.shared.configure()
+    let configured = Defaults[.agentListenerPort]
+    let port: UInt16 = (configured > 0 && configured <= 65535) ? UInt16(configured) : 7878
     let receiver = EventReceiver(port: port, store: self)
     self.receiver = receiver
     Task {
@@ -96,13 +98,25 @@ final class AgentMonitorManager: ObservableObject {
   /// past the TTL. Iterates a snapshot so the dictionary can be mutated safely.
   private func runMaintenance() {
     let now = Date()
+    let idleThreshold = Defaults[.agentIdleThreshold]
+    let stallThreshold = Defaults[.agentStallThreshold]
     for (key, s) in Array(sessions) {
+      let idle = now.timeIntervalSince(s.lastActivity)
       switch s.status {
       case .working:
-        // No tool in flight and silent past the threshold → parked at the
-        // prompt awaiting the user. A long-running tool keeps `toolInFlight`
-        // true (between pre_tool/post_tool), so it stays "working".
-        if !s.toolInFlight, now.timeIntervalSince(s.lastActivity) > idleThreshold {
+        if s.toolInFlight {
+          // A tool is running but has been silent past the stall threshold →
+          // flag as possibly stuck (no post_tool, no other event).
+          if idle > stallThreshold {
+            var u = s
+            u.status = .stalled
+            sessions[key] = u
+            logger.debug("session working→stalled: \(key, privacy: .public)")
+            emitAlert(for: u)
+          }
+        } else if idle > idleThreshold {
+          // No tool in flight and silent past the threshold → parked at the
+          // prompt awaiting the user.
           var u = s
           u.status = .waiting
           sessions[key] = u
@@ -110,7 +124,7 @@ final class AgentMonitorManager: ObservableObject {
           emitAlert(for: u)
         }
       case .waiting, .done:
-        if now.timeIntervalSince(s.lastActivity) > idleTTL {
+        if idle > idleTTL {
           sessions.removeValue(forKey: key)
           logger.debug("session pruned (idle > TTL): \(key, privacy: .public)")
         }
@@ -191,7 +205,8 @@ final class AgentMonitorManager: ObservableObject {
 
   // MARK: - Private
 
-  /// Publish a one-shot attention signal for `session`.
+  /// Publish a one-shot attention signal for `session` and fire a desktop
+  /// notification (gated by settings inside the notification manager).
   private func emitAlert(for session: Session) {
     alertSeq += 1
     lastAlert = NotchAlert(
@@ -201,6 +216,7 @@ final class AgentMonitorManager: ObservableObject {
       status: session.status,
       seq: alertSeq
     )
+    AgentNotificationManager.shared.notify(for: session)
   }
 
   private func sessionKey(for event: Event) -> String {
