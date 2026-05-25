@@ -27,7 +27,16 @@ extension Defaults.Keys {
   /// A working session with no tool in flight and no activity for this many
   /// seconds is demoted to "needs input".
   static let agentIdleThreshold = Key<Double>("agentIdleThreshold", default: 60)
-  /// A working session with a tool in flight but silent for this many seconds
-  /// is flagged "stalled".
+  /// A tool in flight but silent for this many seconds is surfaced as "needs
+  /// input" (likely blocked on a permission prompt). Best-effort: a genuinely
+  /// long-running tool also trips this until it finishes.
+  static let agentToolWaitThreshold = Key<Double>("agentToolWaitThreshold", default: 45)
+
+  /// A tool in flight but silent for this many seconds is flagged "stalled"
+  /// (likely hung). Should be larger than the tool-wait threshold.
   static let agentStallThreshold = Key<Double>("agentStallThreshold", default: 300)
+
+  /// Show a small status dot in the closed (collapsed) notch when a session is
+  /// live and the notch is otherwise idle (no music/OSD).
+  static let agentNotchIndicator = Key<Bool>("agentNotchIndicator", default: true)
 }

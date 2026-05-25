@@ -13,6 +13,7 @@ struct AgentsSettings: View {
   @Default(.agentMonitorEnabled) var enabled
   @Default(.agentNotificationsEnabled) var notificationsEnabled
   @Default(.agentIdleThreshold) var idleThreshold
+  @Default(.agentToolWaitThreshold) var toolWaitThreshold
   @Default(.agentStallThreshold) var stallThreshold
   @Default(.agentListenerPort) var port
 
@@ -29,10 +30,16 @@ struct AgentsSettings: View {
             AgentMonitorManager.shared.stop()
           }
         }
+        Defaults.Toggle(key: .agentNotchIndicator) {
+          Text("Show status dot in the closed notch")
+        }
+        .disabled(!enabled)
       } header: {
         Text("General")
       } footer: {
-        HelpText("Listens on 127.0.0.1 for Claude Code / Codex hook events.")
+        HelpText(
+          "Listens on 127.0.0.1 for Claude Code / Codex hook events. The closed-notch "
+            + "dot appears when a session is live and the notch is otherwise idle.")
       }
 
       Section {
@@ -70,6 +77,14 @@ struct AgentsSettings: View {
         }
         VStack(alignment: .leading) {
           HStack {
+            Text("Tool wait → needs input")
+            Spacer()
+            Text("\(Int(toolWaitThreshold))s").foregroundStyle(.secondary)
+          }
+          Slider(value: $toolWaitThreshold, in: 15...300, step: 15)
+        }
+        VStack(alignment: .leading) {
+          HStack {
             Text("Stall threshold")
             Spacer()
             Text("\(Int(stallThreshold))s").foregroundStyle(.secondary)
@@ -81,7 +96,9 @@ struct AgentsSettings: View {
       } footer: {
         HelpText(
           "An idle working session flips to \"needs input\" after the idle time. "
-            + "A tool that runs silently longer than the stall time is flagged as possibly stuck.")
+            + "A tool in flight that goes silent past the tool-wait time also shows "
+            + "\"needs input\" (catches permission prompts; a long-running tool trips it too). "
+            + "Past the longer stall time it is flagged as possibly stuck.")
       }
 
       Section {

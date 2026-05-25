@@ -36,6 +36,10 @@ final class AgentMonitorManager: ObservableObject {
   /// stall thresholds are user-configurable; see `Defaults.Keys`.)
   private let idleTTL: TimeInterval = 30 * 60
 
+  /// Tools whose `pre_tool` means the agent is blocked awaiting the user, so
+  /// the session is "needs input" rather than "working" while they run.
+  private static let interactiveTools: Set<String> = ["AskUserQuestion", "ExitPlanMode"]
+
   private init() {}
 
   // MARK: - Derived
@@ -99,31 +103,36 @@ final class AgentMonitorManager: ObservableObject {
   private func runMaintenance() {
     let now = Date()
     let idleThreshold = Defaults[.agentIdleThreshold]
+    let toolWaitThreshold = Defaults[.agentToolWaitThreshold]
     let stallThreshold = Defaults[.agentStallThreshold]
     for (key, s) in Array(sessions) {
       let idle = now.timeIntervalSince(s.lastActivity)
       switch s.status {
       case .working:
         if s.toolInFlight {
-          // A tool is running but has been silent past the stall threshold →
-          // flag as possibly stuck (no post_tool, no other event).
+          // A tool has been in flight and silent. We can't tell "blocked on a
+          // permission prompt" from "running a slow command" — same hooks. So
+          // first surface it as "needs input" (the common case: it wants you),
+          // then escalate to "stalled" if it drags on much longer.
           if idle > stallThreshold {
-            var u = s
-            u.status = .stalled
-            sessions[key] = u
-            logger.debug("session working→stalled: \(key, privacy: .public)")
-            emitAlert(for: u)
+            demote(key, to: .stalled, toolInFlight: true, reason: "tool stalled")
+          } else if idle > toolWaitThreshold {
+            demote(key, to: .waiting, toolInFlight: true, reason: "tool wait → needs input")
           }
         } else if idle > idleThreshold {
-          // No tool in flight and silent past the threshold → parked at the
-          // prompt awaiting the user.
-          var u = s
-          u.status = .waiting
-          sessions[key] = u
-          logger.debug("session idle→waiting: \(key, privacy: .public)")
-          emitAlert(for: u)
+          // No tool in flight and silent → parked at the prompt awaiting you.
+          demote(key, to: .waiting, toolInFlight: false, reason: "idle → needs input")
         }
-      case .waiting, .done:
+      case .waiting:
+        // A tool-in-flight wait that drags well past the stall threshold is
+        // probably stuck, not just awaiting you.
+        if s.toolInFlight && idle > stallThreshold {
+          demote(key, to: .stalled, toolInFlight: true, reason: "wait → stalled")
+        } else if idle > idleTTL {
+          sessions.removeValue(forKey: key)
+          logger.debug("session pruned (idle > TTL): \(key, privacy: .public)")
+        }
+      case .done:
         if idle > idleTTL {
           sessions.removeValue(forKey: key)
           logger.debug("session pruned (idle > TTL): \(key, privacy: .public)")
@@ -132,6 +141,17 @@ final class AgentMonitorManager: ObservableObject {
         break
       }
     }
+  }
+
+  /// Move a session to a new status (no-op if already there), preserving the
+  /// tool-in-flight flag as given, and emit an attention alert for the change.
+  private func demote(_ key: String, to status: SessionStatus, toolInFlight: Bool, reason: String) {
+    guard var s = sessions[key], s.status != status else { return }
+    s.status = status
+    s.toolInFlight = toolInFlight
+    sessions[key] = s
+    logger.debug("session \(reason, privacy: .public): \(key, privacy: .public)")
+    emitAlert(for: s)
   }
 
   // MARK: - Update (folded from SessionStore)
@@ -155,21 +175,34 @@ final class AgentMonitorManager: ObservableObject {
       logger.debug("session created: \(key, privacy: .public)")
 
     case .preTool:
-      guard var s = sessions[key] else { return }
+      var s = adoptedSession(key: key, event: event)
+      var tool: String?
       if case .object(let obj) = event.payload,
-        case .string(let tool) = obj["tool_name"]
+        case .string(let t) = obj["tool_name"]
       {
-        s.lastTool = tool
+        tool = t
+        s.lastTool = t
       }
       s.lastActivity = .init()
-      s.status = .working
-      s.toolInFlight = true
-      sessions[key] = s
+      if let tool, Self.interactiveTools.contains(tool) {
+        // This tool blocks on the user (e.g. AskUserQuestion, ExitPlanMode):
+        // the agent is awaiting *you*, not working. Show "needs input".
+        let wasWaiting = s.status == .waiting
+        s.status = .waiting
+        s.toolInFlight = false
+        sessions[key] = s
+        if !wasWaiting { emitAlert(for: s) }
+      } else {
+        s.status = .working
+        s.toolInFlight = true
+        sessions[key] = s
+      }
 
     case .postTool:
-      guard var s = sessions[key] else { return }
+      var s = adoptedSession(key: key, event: event)
       s.lastActivity = .init()
       s.toolInFlight = false
+      s.status = .working  // tool returned (incl. a user answer) → back to work
       sessions[key] = s
 
     // A finished turn (`stop`/`turn_complete`) and an explicit `waiting`
@@ -179,7 +212,7 @@ final class AgentMonitorManager: ObservableObject {
     // back to .working. (Removal happens on `session_end` or the idle-TTL
     // prune, never per-turn.)
     case .waiting, .stop, .turnComplete:
-      guard var s = sessions[key] else { return }
+      var s = adoptedSession(key: key, event: event)
       let wasWaiting = s.status == .waiting
       s.status = .waiting
       s.toolInFlight = false
@@ -222,5 +255,25 @@ final class AgentMonitorManager: ObservableObject {
   private func sessionKey(for event: Event) -> String {
     if let sid = event.sessionId, !sid.isEmpty { return sid }
     return "\(event.source.rawValue)-\(event.pid)"
+  }
+
+  /// Return the existing session for `key`, or lazily adopt a new one from this
+  /// event. Lets sessions that began before the monitor started (or survived an
+  /// app restart) reappear on their next hook event, instead of being dropped
+  /// until they happen to send another `session_start`.
+  private func adoptedSession(key: String, event: Event) -> Session {
+    if let existing = sessions[key] { return existing }
+    logger.debug(
+      "session adopted from \(event.event.rawValue, privacy: .public): \(key, privacy: .public)")
+    return Session(
+      id: key,
+      source: event.source,
+      pid: event.pid,
+      cwd: event.cwd,
+      status: .working,
+      lastTool: nil,
+      lastActivity: .init(),
+      startedAt: .init()
+    )
   }
 }
