@@ -313,6 +313,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
 
+        // Start the loopback listener for Claude Code / Codex agent events.
+        AgentMonitorManager.shared.start()
+
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(screenConfigurationDidChange),
