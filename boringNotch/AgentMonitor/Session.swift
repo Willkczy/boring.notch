@@ -77,6 +77,10 @@ struct Session: Identifiable, Sendable {
   var status: SessionStatus
   /// Name of the last tool invoked, if any.
   var lastTool: String?
+  /// True between a `pre_tool` and its `post_tool` — a tool is running. Used
+  /// by idle detection to avoid demoting a session that is mid-tool (e.g. a
+  /// long `Bash` build emits no events until the tool finishes).
+  var toolInFlight: Bool = false
   var lastActivity: Date
   let startedAt: Date
 

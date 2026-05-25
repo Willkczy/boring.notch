@@ -28,6 +28,15 @@ final class AgentMonitorManager: ObservableObject {
 
   private var receiver: EventReceiver?
   private var started = false
+  private var maintenanceTimer: Timer?
+
+  /// A `working` session with no tool in flight and no activity for this long
+  /// is parked at the prompt awaiting the user → demote it to `waiting`.
+  private let idleThreshold: TimeInterval = 60
+
+  /// Drop idle (`waiting`/`done`) sessions after this long with no activity —
+  /// a safety net for sessions that never send a `session_end`.
+  private let idleTTL: TimeInterval = 30 * 60
 
   private init() {}
 
@@ -62,14 +71,53 @@ final class AgentMonitorManager: ObservableObject {
           "EventReceiver failed to start: \(String(describing: error), privacy: .public)")
       }
     }
+    startMaintenanceTimer()
   }
 
   /// Stop the listener and release it.
   func stop() {
+    maintenanceTimer?.invalidate()
+    maintenanceTimer = nil
     let receiver = self.receiver
     Task { await receiver?.stop() }
     self.receiver = nil
     started = false
+  }
+
+  /// Periodic upkeep timer, added to the main run loop (fires on the main actor).
+  private func startMaintenanceTimer() {
+    maintenanceTimer?.invalidate()
+    maintenanceTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+      Task { @MainActor in self?.runMaintenance() }
+    }
+  }
+
+  /// Demote silent working sessions to "needs input", and drop idle sessions
+  /// past the TTL. Iterates a snapshot so the dictionary can be mutated safely.
+  private func runMaintenance() {
+    let now = Date()
+    for (key, s) in Array(sessions) {
+      switch s.status {
+      case .working:
+        // No tool in flight and silent past the threshold → parked at the
+        // prompt awaiting the user. A long-running tool keeps `toolInFlight`
+        // true (between pre_tool/post_tool), so it stays "working".
+        if !s.toolInFlight, now.timeIntervalSince(s.lastActivity) > idleThreshold {
+          var u = s
+          u.status = .waiting
+          sessions[key] = u
+          logger.debug("session idle→waiting: \(key, privacy: .public)")
+          emitAlert(for: u)
+        }
+      case .waiting, .done:
+        if now.timeIntervalSince(s.lastActivity) > idleTTL {
+          sessions.removeValue(forKey: key)
+          logger.debug("session pruned (idle > TTL): \(key, privacy: .public)")
+        }
+      case .stalled, .failed:
+        break
+      }
+    }
   }
 
   // MARK: - Update (folded from SessionStore)
@@ -101,35 +149,36 @@ final class AgentMonitorManager: ObservableObject {
       }
       s.lastActivity = .init()
       s.status = .working
+      s.toolInFlight = true
       sessions[key] = s
 
     case .postTool:
       guard var s = sessions[key] else { return }
       s.lastActivity = .init()
+      s.toolInFlight = false
       sessions[key] = s
 
-    case .waiting:
+    // A finished turn (`stop`/`turn_complete`) and an explicit `waiting`
+    // notification mean the same thing for a long-lived session: it is now
+    // idle, awaiting the user. A session spans many turns, so keep the row
+    // alive and surface it as "needs input" — the next `pre_tool` flips it
+    // back to .working. (Removal happens on `session_end` or the idle-TTL
+    // prune, never per-turn.)
+    case .waiting, .stop, .turnComplete:
       guard var s = sessions[key] else { return }
       let wasWaiting = s.status == .waiting
       s.status = .waiting
+      s.toolInFlight = false
+      s.lastActivity = .init()
       sessions[key] = s
       logger.debug("session waiting: \(key, privacy: .public)")
       if !wasWaiting { emitAlert(for: s) }
 
-    case .stop, .turnComplete:
-      guard var s = sessions[key] else { return }
-      let wasDone = s.status == .done
-      s.status = .done
-      sessions[key] = s
-      logger.debug("session done: \(key, privacy: .public)")
-      if !wasDone { emitAlert(for: s) }
-      // Remove after 5 s; skip if status changed (e.g. re-used session id).
-      Task {
-        try? await Task.sleep(for: .seconds(5))
-        if sessions[key]?.status == .done {
-          sessions.removeValue(forKey: key)
-          logger.debug("session removed: \(key, privacy: .public)")
-        }
+    case .sessionEnd:
+      // Real end of the session (e.g. Claude Code's SessionEnd hook, once the
+      // bridge forwards it). Drop the row immediately.
+      if sessions.removeValue(forKey: key) != nil {
+        logger.debug("session ended: \(key, privacy: .public)")
       }
 
     case .subagentStop:

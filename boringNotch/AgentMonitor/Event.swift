@@ -21,6 +21,7 @@ enum AgentEventType: String, Codable, Sendable {
   case stop
   case subagentStop = "subagent_stop"
   case turnComplete = "turn_complete"
+  case sessionEnd = "session_end"
   case unknown
 
   init(from decoder: Decoder) throws {
