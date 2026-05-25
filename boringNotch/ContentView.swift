@@ -23,6 +23,7 @@ struct ContentView: View {
     @ObservedObject var batteryModel = BatteryStatusViewModel.shared
     @ObservedObject var brightnessManager = BrightnessManager.shared
     @ObservedObject var volumeManager = VolumeManager.shared
+    @ObservedObject var agentManager = AgentMonitorManager.shared
     @State private var hoverTask: Task<Void, Never>?
     @State private var isHovering: Bool = false
     @State private var anyDropDebounceTask: Task<Void, Never>?
@@ -138,6 +139,16 @@ struct ContentView: View {
                             .fill(.black)
                             .frame(height: 1)
                             .padding(.horizontal, topCornerRadius)
+                    }
+                    // Glance-able agent status dot, pinned under the camera on the
+                    // closed notch. Drawn after clipShape so it isn't masked, and
+                    // independent of the content branches so it shows over music too.
+                    .overlay(alignment: .bottom) {
+                        if vm.notchState == .closed && agentManager.hasActiveSessions
+                            && Defaults[.agentNotchIndicator] {
+                            AgentNotchIndicator()
+                                .padding(.bottom, 3)
+                        }
                     }
                     .shadow(
                         color: ((vm.notchState == .open || isHovering) && Defaults[.enableShadow])
