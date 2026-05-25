@@ -1,0 +1,127 @@
+//
+//  AgentsView.swift
+//  boringNotch — Agent Monitor
+//
+//  Open-notch "Agents" tab: a scrollable list of live Claude Code / Codex
+//  sessions. Each row shows source, working-dir basename, last tool, status
+//  and elapsed time. Tapping a row focuses that session's terminal via its
+//  parent PID. Ported from the standalone app's ExpandedView, restyled for
+//  boring.notch's dark open-notch panel (the notch shape + background are
+//  owned by ContentView).
+//
+
+import AppKit
+import Darwin
+import SwiftUI
+
+struct AgentsView: View {
+  @ObservedObject var manager = AgentMonitorManager.shared
+
+  private var sortedSessions: [Session] {
+    manager.sessions.values.sorted { $0.startedAt < $1.startedAt }
+  }
+
+  var body: some View {
+    Group {
+      if sortedSessions.isEmpty {
+        VStack(spacing: 6) {
+          Image(systemName: "terminal")
+            .font(.title2)
+          Text("No active agent sessions")
+            .font(.callout)
+        }
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else {
+        ScrollView {
+          VStack(spacing: 4) {
+            ForEach(sortedSessions) { session in
+              AgentSessionRow(session: session)
+                .contentShape(Rectangle())
+                .onTapGesture { focusTerminal(pid: session.pid) }
+            }
+          }
+          .padding(.horizontal, 8)
+          .padding(.vertical, 4)
+        }
+        .scrollIndicators(.never)
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+}
+
+// MARK: - Session row
+
+private struct AgentSessionRow: View {
+  let session: Session
+  @State private var elapsed: TimeInterval = 0
+  private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+  var body: some View {
+    HStack(spacing: 8) {
+      Circle()
+        .fill(session.status.color)
+        .frame(width: 8, height: 8)
+
+      VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 4) {
+          Text(session.source.rawValue)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+          Text(session.cwdBasename)
+            .font(.caption)
+            .fontWeight(.medium)
+            .foregroundStyle(.white)
+            .lineLimit(1)
+        }
+        if let tool = session.lastTool {
+          Text(tool)
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+        }
+      }
+
+      Spacer()
+
+      Text(session.status.label)
+        .font(.caption2)
+        .foregroundStyle(session.status.color)
+      Text(formatElapsed(elapsed))
+        .font(.caption2.monospacedDigit())
+        .foregroundStyle(.secondary)
+    }
+    .padding(.vertical, 6)
+    .padding(.horizontal, 8)
+    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+    .onAppear { elapsed = -session.startedAt.timeIntervalSinceNow }
+    .onReceive(timer) { _ in elapsed = -session.startedAt.timeIntervalSinceNow }
+  }
+
+  private func formatElapsed(_ s: TimeInterval) -> String {
+    let total = max(0, Int(s))
+    if total < 60 { return "\(total)s" }
+    return "\(total / 60)m\(total % 60)s"
+  }
+}
+
+// MARK: - Terminal focus
+
+/// Activate the terminal that launched `pid`. The agent process is a child of
+/// the terminal emulator; activating the parent brings that window forward.
+private func focusTerminal(pid: Int) {
+  guard
+    let ppid = parentPID(of: pid_t(pid)),
+    let app = NSRunningApplication(processIdentifier: ppid)
+  else { return }
+  app.activate(options: [.activateAllWindows])
+}
+
+private func parentPID(of pid: pid_t) -> pid_t? {
+  var info = kinfo_proc()
+  var size = MemoryLayout<kinfo_proc>.size
+  var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+  guard sysctl(&mib, 4, &info, &size, nil, 0) == 0 else { return nil }
+  let ppid = info.kp_eproc.e_ppid
+  return ppid > 1 ? ppid : nil
+}

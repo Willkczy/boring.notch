@@ -402,6 +402,8 @@ struct ContentView: View {
                         )
                     case .shelf:
                         ShelfView()
+                    case .agents:
+                        AgentsView()
                     }
                 }
                 .transition(
