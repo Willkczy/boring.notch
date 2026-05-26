@@ -7,51 +7,47 @@
 
 import SwiftUI
 
-/// The current lifecycle state of an agent session.
+/// The current lifecycle state of an agent session. Three states, each mapped
+/// to a distinct Claude Code hook (no timer heuristics):
+///   working   — running (session_start / pre_tool / post_tool)
+///   needInput — Notification hook: needs permission or input → orange + notify
+///   tempDone  — Stop hook: finished the turn, stopped outputting → orange + notify
 enum SessionStatus: Sendable, Equatable {
   case working
-  case waiting
-  case stalled
-  case done
-  case failed
+  case needInput
+  case tempDone
 
-  /// SwiftUI color for the status dot.
+  /// SwiftUI color for the status dot. Both attention states are orange.
   var color: Color {
     switch self {
     case .working: .green
-    case .waiting: .orange
-    case .stalled, .failed: .red
-    case .done: .gray
+    case .needInput, .tempDone: .orange
     }
   }
 
   /// Priority used to pick the collapsed-dot color. Highest wins.
   var urgency: Int {
     switch self {
-    case .waiting: 4
-    case .stalled: 3
-    case .working: 2
-    case .failed: 1
-    case .done: 0
+    case .needInput: 2
+    case .tempDone: 1
+    case .working: 0
     }
   }
 
-  /// Short label shown in the peek row.
+  /// Short label shown in the row.
   var label: String {
     switch self {
     case .working: "working"
-    case .waiting: "needs input"
-    case .stalled: "stalled"
-    case .done: "done"
-    case .failed: "failed"
+    case .needInput: "need input"
+    case .tempDone: "temp-done"
     }
   }
 
-  /// Whether a transition *into* this status should grab attention (peek).
+  /// Whether a transition *into* this status should grab attention (peek + notify).
   var alertsAttention: Bool {
     switch self {
-    case .waiting, .done, .failed: true
-    case .working, .stalled: false
+    case .needInput, .tempDone: true
+    case .working: false
     }
   }
 }
@@ -77,10 +73,6 @@ struct Session: Identifiable, Sendable {
   var status: SessionStatus
   /// Name of the last tool invoked, if any.
   var lastTool: String?
-  /// True between a `pre_tool` and its `post_tool` — a tool is running. Used
-  /// by idle detection to avoid demoting a session that is mid-tool (e.g. a
-  /// long `Bash` build emits no events until the tool finishes).
-  var toolInFlight: Bool = false
   var lastActivity: Date
   let startedAt: Date
 

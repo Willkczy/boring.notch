@@ -12,9 +12,6 @@ import SwiftUI
 struct AgentsSettings: View {
   @Default(.agentMonitorEnabled) var enabled
   @Default(.agentNotificationsEnabled) var notificationsEnabled
-  @Default(.agentIdleThreshold) var idleThreshold
-  @Default(.agentToolWaitThreshold) var toolWaitThreshold
-  @Default(.agentStallThreshold) var stallThreshold
   @Default(.agentListenerPort) var port
 
   var body: some View {
@@ -50,8 +47,8 @@ struct AgentsSettings: View {
           Text("Notify when a session needs input")
         }
         .disabled(!notificationsEnabled)
-        Defaults.Toggle(key: .agentNotifyStalled) {
-          Text("Notify when a session may be stuck")
+        Defaults.Toggle(key: .agentNotifyDone) {
+          Text("Notify when a session finishes")
         }
         .disabled(!notificationsEnabled)
         Defaults.Toggle(key: .agentNotificationSound) {
@@ -62,43 +59,9 @@ struct AgentsSettings: View {
         Text("Notifications")
       } footer: {
         HelpText(
-          "A session becomes \"needs input\" when it finishes a turn or sits idle. "
-            + "macOS asks for notification permission on first launch.")
-      }
-
-      Section {
-        VStack(alignment: .leading) {
-          HStack {
-            Text("Idle → needs input")
-            Spacer()
-            Text("\(Int(idleThreshold))s").foregroundStyle(.secondary)
-          }
-          Slider(value: $idleThreshold, in: 15...300, step: 15)
-        }
-        VStack(alignment: .leading) {
-          HStack {
-            Text("Tool wait → needs input")
-            Spacer()
-            Text("\(Int(toolWaitThreshold))s").foregroundStyle(.secondary)
-          }
-          Slider(value: $toolWaitThreshold, in: 15...300, step: 15)
-        }
-        VStack(alignment: .leading) {
-          HStack {
-            Text("Stall threshold")
-            Spacer()
-            Text("\(Int(stallThreshold))s").foregroundStyle(.secondary)
-          }
-          Slider(value: $stallThreshold, in: 60...1800, step: 30)
-        }
-      } header: {
-        Text("Timing")
-      } footer: {
-        HelpText(
-          "An idle working session flips to \"needs input\" after the idle time. "
-            + "A tool in flight that goes silent past the tool-wait time also shows "
-            + "\"needs input\" (catches permission prompts; a long-running tool trips it too). "
-            + "Past the longer stall time it is flagged as possibly stuck.")
+          "\"Need input\" fires when Claude asks for permission or input; \"finished\" "
+            + "fires each time it stops outputting. macOS asks for notification "
+            + "permission on first launch.")
       }
 
       Section {

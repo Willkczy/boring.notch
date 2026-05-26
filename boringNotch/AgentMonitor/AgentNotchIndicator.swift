@@ -3,8 +3,8 @@
 //  boringNotch — Agent Monitor
 //
 //  Collapsed (closed-notch) status indicator: one coloured dot per status
-//  present across live sessions (green working / orange needs-input / red
-//  stalled), with a count when a status has more than one session. Rendered as
+//  present across live sessions (green working / orange need-input /
+//  orange temp-done), with a count when a status has more than one session. Rendered as
 //  an overlay on the closed notch (under the camera) so it stays visible
 //  regardless of music / OSD content.
 //
@@ -15,7 +15,7 @@ struct AgentNotchIndicator: View {
   @ObservedObject var manager = AgentMonitorManager.shared
 
   /// Stable display order, most-urgent first.
-  private static let order: [SessionStatus] = [.waiting, .stalled, .failed, .working, .done]
+  private static let order: [SessionStatus] = [.needInput, .tempDone, .working]
 
   /// (status, count) for each status that has at least one session.
   private var groups: [(status: SessionStatus, count: Int)] {

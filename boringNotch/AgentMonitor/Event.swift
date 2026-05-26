@@ -15,8 +15,10 @@ import Foundation
 /// 400. This also tolerates capitalized hook names the bridge may forward.
 enum AgentEventType: String, Codable, Sendable {
   case sessionStart = "session_start"
+  case userPrompt = "user_prompt"
   case preTool = "pre_tool"
   case postTool = "post_tool"
+  case permissionRequest = "permission_request"
   case waiting
   case stop
   case subagentStop = "subagent_stop"

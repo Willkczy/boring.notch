@@ -45,13 +45,13 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
 
     let title: String
     switch session.status {
-    case .waiting:
+    case .needInput:
       guard Defaults[.agentNotifyNeedsInput] else { return }
       title = "\(session.source.rawValue) needs input"
-    case .stalled:
-      guard Defaults[.agentNotifyStalled] else { return }
-      title = "\(session.source.rawValue) may be stuck"
-    case .working, .done, .failed:
+    case .tempDone:
+      guard Defaults[.agentNotifyDone] else { return }
+      title = "\(session.source.rawValue) finished"
+    case .working:
       return
     }
 
