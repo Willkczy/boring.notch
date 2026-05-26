@@ -40,6 +40,23 @@ final class AgentMonitorManager: ObservableObject {
   }
   private var pendingPermissions: [String: PendingPermission] = [:]
 
+  /// UI-facing snapshot of pending interactive permissions (no continuations).
+  /// This is the SINGLE SOURCE OF TRUTH for the Allow/Deny bar: an entry exists
+  /// iff a decision is genuinely outstanding, so the bar appears and clears
+  /// exactly in step with `pendingPermissions` — never a stale copied flag.
+  struct PendingPrompt: Identifiable, Sendable, Equatable {
+    let id: String
+    let sessionKey: String
+    let tool: String?
+    let inputSummary: String?
+  }
+  @Published private(set) var pendingPrompts: [PendingPrompt] = []
+
+  /// The pending interactive permission for a session, if any (oldest first).
+  func pendingPrompt(for sessionKey: String) -> PendingPrompt? {
+    pendingPrompts.first { $0.sessionKey == sessionKey }
+  }
+
   /// Drop idle (`waiting`/`done`) sessions after this long with no activity —
   /// a safety net for sessions that never send a `session_end`. (The idle and
   /// stall thresholds are user-configurable; see `Defaults.Keys`.)
@@ -143,6 +160,7 @@ final class AgentMonitorManager: ObservableObject {
     case .userPrompt:
       // User submitted a prompt → the agent is back to work. Clears a lingering
       // temp-done the instant you type, before the first tool call arrives.
+      clearPendingPermissions(for: key)
       var s = adoptedSession(key: key, event: event)
       s.status = .working
       s.lastActivity = .init()
@@ -171,6 +189,8 @@ final class AgentMonitorManager: ObservableObject {
       }
 
     case .postTool:
+      // Tool finished running → any permission for it is resolved.
+      clearPendingPermissions(for: key)
       var s = adoptedSession(key: key, event: event)
       s.lastActivity = .init()
       s.status = .working  // tool returned (incl. a user answer) → back to work
@@ -211,6 +231,8 @@ final class AgentMonitorManager: ObservableObject {
     // `pre_tool` flips it back to .working. (Removal is on `session_end` or the
     // idle-TTL prune, never per-turn.)
     case .stop, .turnComplete:
+      // Turn ended → nothing is awaiting a permission decision anymore.
+      clearPendingPermissions(for: key)
       var s = adoptedSession(key: key, event: event)
       let wasDone = s.status == .tempDone
       s.status = .tempDone
@@ -243,7 +265,7 @@ final class AgentMonitorManager: ObservableObject {
   /// Every other path — interactive mode OFF, timeout, no decision — returns
   /// `.deferred`, which makes the bridge emit no stdout so Claude Code's own
   /// terminal permission prompt applies. We NEVER auto-allow.
-  func requestPermissionDecision(event: Event) async -> PermissionDecision {
+  func requestPermissionDecision(event: Event, id: String) async -> PermissionDecision {
     let key = sessionKey(for: event)
     let (tool, inputSummary) = Self.permissionDetails(from: event.payload)
 
@@ -255,20 +277,19 @@ final class AgentMonitorManager: ObservableObject {
 
     guard Defaults[.agentInteractivePermissions] else {
       // Observe-only (E1 behaviour): surface "need input", defer the decision.
-      s.pendingPermissionId = nil
       sessions[key] = s
       logger.debug("permission (observe-only → defer): \(key, privacy: .public)")
       if !wasNeedInput { emitAlert(for: s) }
       return .deferred
     }
 
-    let id = UUID().uuidString
-    s.pendingPermissionId = id
-    s.pendingInputSummary = inputSummary
     sessions[key] = s
+    emitAlert(for: s)
+
+    pendingPrompts.append(
+      PendingPrompt(id: id, sessionKey: key, tool: tool, inputSummary: inputSummary))
     logger.debug(
       "permission pending (interactive): \(key, privacy: .public) tool=\(tool ?? "?", privacy: .public)")
-    emitAlert(for: s)
 
     let timeout = max(1, Defaults[.agentDecisionTimeout])
     return await withCheckedContinuation { (cont: CheckedContinuation<PermissionDecision, Never>) in
@@ -282,20 +303,36 @@ final class AgentMonitorManager: ObservableObject {
   }
 
   /// Resolve a pending interactive permission (user click, or the timeout
-  /// safety net). No-op if already resolved.
+  /// safety net). No-op if already resolved. Removing the prompt from
+  /// `pendingPrompts` clears the Allow/Deny bar immediately — independent of any
+  /// session-status changes, so it can never linger after a decision.
   func resolvePermission(id: String, decision: PermissionDecision, viaTimeout: Bool = false) {
     guard let pending = pendingPermissions.removeValue(forKey: id) else { return }
+    pendingPrompts.removeAll { $0.id == id }
     pending.continuation.resume(returning: decision)
-    if var s = sessions[pending.sessionKey], s.pendingPermissionId == id {
-      s.pendingPermissionId = nil
-      s.pendingInputSummary = nil
-      if decision == .allow { s.status = .working }  // the tool will now run
+    // Allowed or denied → the agent is unblocked and proceeding; reflect that.
+    // Deferred → a terminal prompt is now up, so leave it as "need input".
+    if decision != .deferred, var s = sessions[pending.sessionKey] {
+      s.status = .working
       s.lastActivity = .init()
       sessions[pending.sessionKey] = s
     }
     logger.debug(
       "permission resolved: \(id, privacy: .public) → \(decision.rawValue, privacy: .public) timeout=\(viaTimeout, privacy: .public)"
     )
+  }
+
+  /// Resolve (as deferred) and clear any pending interactive permissions for a
+  /// session. Called when a forward-progress event proves the agent is no
+  /// longer blocked on a decision — the tool ran (`post_tool`) or the turn
+  /// ended (`stop`). Claude Code does not always block tool execution on, or
+  /// kill, the PermissionRequest hook, so a prompt it resolved by another path
+  /// (or never blocked on) would otherwise linger in the notch until the
+  /// timeout. Resolving as `.deferred` also unblocks any still-hanging bridge
+  /// connection harmlessly (the tool already ran).
+  private func clearPendingPermissions(for sessionKey: String) {
+    let ids = pendingPermissions.values.filter { $0.sessionKey == sessionKey }.map(\.id)
+    for id in ids { resolvePermission(id: id, decision: .deferred) }
   }
 
   /// Pull a tool name and a short input summary out of a PermissionRequest

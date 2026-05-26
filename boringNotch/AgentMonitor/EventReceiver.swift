@@ -129,8 +129,16 @@ actor EventReceiver {
         // bridge blocks on this response. Default-safe: the manager returns
         // `.deferred` for every non-explicit path, so Claude Code's own
         // terminal prompt still applies.
+        let id = UUID().uuidString
+        // If the bridge closes the connection before we decide (Claude Code
+        // killed/abandoned the hook — e.g. the permission was resolved by
+        // another path), resolve as deferred so the notch prompt clears at once
+        // instead of lingering until the decision timeout.
+        watchForClose(connection) {
+          Task { await store.resolvePermission(id: id, decision: .deferred) }
+        }
         Task {
-          let decision = await store.requestPermissionDecision(event: event)
+          let decision = await store.requestPermissionDecision(event: event, id: id)
           send(HTTPMessage.decision(decision), on: connection)
         }
         return
@@ -141,6 +149,18 @@ actor EventReceiver {
     } catch {
       logger.error("Event decode failed: \(String(describing: error), privacy: .public)")
       send(HTTPMessage.badRequest, on: connection)
+    }
+  }
+
+  /// Fire `onClose` when the peer closes the held connection (or it errors)
+  /// while we wait to send a decision. A blocked bridge `curl` sends no more
+  /// data, so this receive only completes when the connection goes away — the
+  /// signal that the pending permission should be cleaned up. (When we send the
+  /// decision and cancel, this also fires, but `resolvePermission` is then a
+  /// no-op since the pending is already gone.)
+  private static func watchForClose(_ connection: NWConnection, onClose: @escaping () -> Void) {
+    connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { _, _, isComplete, error in
+      if isComplete || error != nil { onClose() }
     }
   }
 

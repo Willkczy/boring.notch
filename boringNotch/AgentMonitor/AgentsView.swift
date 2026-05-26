@@ -36,7 +36,7 @@ struct AgentsView: View {
         ScrollView {
           VStack(spacing: 4) {
             ForEach(sortedSessions) { session in
-              AgentSessionRow(session: session)
+              AgentSessionRow(session: session, prompt: manager.pendingPrompt(for: session.id))
                 .contentShape(Rectangle())
                 .onTapGesture { focusTerminal(pid: session.pid) }
             }
@@ -55,6 +55,9 @@ struct AgentsView: View {
 
 private struct AgentSessionRow: View {
   let session: Session
+  /// Live pending permission for this session (nil when none) — drives the
+  /// Allow/Deny bar straight from the manager's source of truth.
+  let prompt: AgentMonitorManager.PendingPrompt?
   @State private var elapsed: TimeInterval = 0
   private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -93,9 +96,10 @@ private struct AgentSessionRow: View {
           .foregroundStyle(.secondary)
       }
 
-      // E2: interactive Allow/Deny when this session is awaiting a permission.
-      if let pendingId = session.pendingPermissionId {
-        decisionBar(pendingId: pendingId)
+      // E2: interactive Allow/Deny while this session is awaiting a permission.
+      // Driven by the live prompt, so it clears the instant the decision lands.
+      if let prompt {
+        decisionBar(prompt)
       }
     }
     .padding(.vertical, 6)
@@ -106,14 +110,14 @@ private struct AgentSessionRow: View {
   }
 
   @ViewBuilder
-  private func decisionBar(pendingId: String) -> some View {
+  private func decisionBar(_ prompt: AgentMonitorManager.PendingPrompt) -> some View {
     VStack(alignment: .leading, spacing: 4) {
       // Show exactly what is being authorized (security: no truncation of the
       // decision-relevant input beyond a generous limit).
-      Text("Permission: \(session.lastTool ?? "tool")")
+      Text("Permission: \(prompt.tool ?? "tool")")
         .font(.caption2.weight(.semibold))
         .foregroundStyle(.orange)
-      if let input = session.pendingInputSummary, !input.isEmpty {
+      if let input = prompt.inputSummary, !input.isEmpty {
         Text(input)
           .font(.caption2.monospaced())
           .foregroundStyle(.white.opacity(0.85))
@@ -122,14 +126,14 @@ private struct AgentSessionRow: View {
       }
       HStack(spacing: 6) {
         Button("Allow") {
-          AgentMonitorManager.shared.resolvePermission(id: pendingId, decision: .allow)
+          AgentMonitorManager.shared.resolvePermission(id: prompt.id, decision: .allow)
         }
         .buttonStyle(.borderedProminent)
         .tint(.green)
         .controlSize(.small)
 
         Button("Deny") {
-          AgentMonitorManager.shared.resolvePermission(id: pendingId, decision: .deny)
+          AgentMonitorManager.shared.resolvePermission(id: prompt.id, decision: .deny)
         }
         .buttonStyle(.bordered)
         .tint(.red)
