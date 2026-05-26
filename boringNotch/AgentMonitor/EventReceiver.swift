@@ -123,6 +123,18 @@ actor EventReceiver {
         pid=\(event.pid, privacy: .public) cwd=\(event.cwd, privacy: .public) \
         ts=\(timestamp, privacy: .public) payload=<redacted>
         """)
+      if event.event == .permissionRequest {
+        // E2: hold the connection open until the app decides (user Allow/Deny
+        // or a timeout). The decision is written back as the HTTP body. The
+        // bridge blocks on this response. Default-safe: the manager returns
+        // `.deferred` for every non-explicit path, so Claude Code's own
+        // terminal prompt still applies.
+        Task {
+          let decision = await store.requestPermissionDecision(event: event)
+          send(HTTPMessage.decision(decision), on: connection)
+        }
+        return
+      }
       send(HTTPMessage.noContent, on: connection)
       // Hop to MainActor to update session state.
       Task { await store.update(event: event) }

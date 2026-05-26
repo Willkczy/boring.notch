@@ -8,12 +8,12 @@
 # and POST to the boringNotch local server. Failures are silent and
 # non-blocking — the agent must NEVER be delayed by us.
 #
-# NOTE: this E1 version is fire-and-forget for every event (including
-# permission_request — the app only observes, it does not decide). Phase E2
-# adds a blocking branch for permission_request that reads the app's decision
-# and emits Claude Code's PermissionRequest stdout JSON. Until then a
-# permission_request still exits 0 with no stdout, so Claude Code falls through
-# to its normal terminal permission prompt.
+# Most events are fire-and-forget. The exception is `permission_request`
+# (Claude Code's PermissionRequest hook): we POST it and BLOCK on the response,
+# then translate the app's decision into the stdout JSON Claude Code expects.
+# Default-safe: if the app returns "defer" (or is down / times out / sends
+# anything unexpected), we print NOTHING and exit 0, so Claude Code falls
+# through to its own terminal permission prompt. We never auto-allow on error.
 
 set -u  # don't set -e: we want to fall through errors silently
 
@@ -65,6 +65,42 @@ else
     # Crude but workable fallback. jq is strongly recommended.
     CWD_ESC=${CWD//\"/\\\"}
     ENVELOPE="{\"event\":\"$EVENT\",\"source\":\"$SOURCE\",\"session_id\":\"$SESSION_ID\",\"pid\":$PID,\"cwd\":\"$CWD_ESC\",\"ts\":$TS,\"payload\":$PAYLOAD}"
+fi
+
+if [ "$EVENT" = "permission_request" ]; then
+    # Blocking: wait for the app's Allow/Deny/defer, then emit Claude Code's
+    # PermissionRequest decision JSON on stdout. DECISION_TIMEOUT must exceed
+    # the app's own decision timeout (default 120s) so the app responds first;
+    # if the app is down, curl returns immediately (connection refused).
+    DECISION_TIMEOUT="${NOTCH_AGENT_DECISION_TIMEOUT:-125}"
+    RESP=$(curl -s --max-time "$DECISION_TIMEOUT" \
+        -H "Content-Type: application/json" \
+        -X POST \
+        -d "$ENVELOPE" \
+        "$ENDPOINT" 2>/dev/null || true)
+
+    BEHAVIOR=""
+    if command -v jq >/dev/null 2>&1; then
+        BEHAVIOR=$(printf '%s' "$RESP" | jq -r '.behavior // empty' 2>/dev/null || true)
+    else
+        case "$RESP" in
+            *'"behavior":"allow"'*) BEHAVIOR="allow" ;;
+            *'"behavior":"deny"'*)  BEHAVIOR="deny" ;;
+        esac
+    fi
+
+    case "$BEHAVIOR" in
+        allow)
+            printf '%s' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
+            ;;
+        deny)
+            printf '%s' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny"}}}'
+            ;;
+        *)
+            # defer / empty / app down / timeout / unexpected → make no decision.
+            : ;;
+    esac
+    exit 0
 fi
 
 curl -s -o /dev/null \

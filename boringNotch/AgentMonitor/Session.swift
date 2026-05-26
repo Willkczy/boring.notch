@@ -52,6 +52,16 @@ enum SessionStatus: Sendable, Equatable {
   }
 }
 
+/// The outcome of an interactive permission request (E2). `deferred` means
+/// "make no decision" — the bridge emits no stdout and Claude Code falls back
+/// to its own terminal permission prompt. This is the default-safe outcome for
+/// every non-explicit path (observe-only mode, timeout, app down).
+enum PermissionDecision: String, Sendable, Equatable {
+  case allow
+  case deny
+  case deferred
+}
+
 /// A one-shot attention signal emitted when a session changes to an
 /// attention-worthy status. The UI observes it to trigger a brief peek.
 struct NotchAlert: Equatable, Sendable {
@@ -75,6 +85,16 @@ struct Session: Identifiable, Sendable {
   var lastTool: String?
   var lastActivity: Date
   let startedAt: Date
+
+  /// E2 interactive permission: when non-nil, this session is awaiting an
+  /// Allow/Deny decision in the notch. Cleared when resolved.
+  var pendingPermissionId: String? = nil
+  /// Human-readable tool input awaiting approval (e.g. the bash command),
+  /// shown next to the Allow/Deny buttons.
+  var pendingInputSummary: String? = nil
+
+  /// True while an interactive permission decision is pending.
+  var awaitingDecision: Bool { pendingPermissionId != nil }
 
   /// Last path component of `cwd` for compact display.
   var cwdBasename: String {

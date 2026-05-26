@@ -24,6 +24,15 @@ extension Defaults.Keys {
   /// Play a sound with notifications.
   static let agentNotificationSound = Key<Bool>("agentNotificationSound", default: true)
 
+  /// E2: approve/deny tool permissions directly from the notch. OFF by default —
+  /// when off the app only OBSERVES (need-input display) and defers every
+  /// permission to Claude Code's normal terminal prompt. Turning this on makes
+  /// the notch's Allow button a real authorization control for tool execution.
+  static let agentInteractivePermissions = Key<Bool>("agentInteractivePermissions", default: false)
+  /// Seconds to wait for an in-notch Allow/Deny before deferring to the terminal
+  /// prompt. Must stay below the bridge's curl timeout (125s).
+  static let agentDecisionTimeout = Key<Double>("agentDecisionTimeout", default: 120)
+
   /// Show a small status dot in the closed (collapsed) notch when a session is
   /// live and the notch is otherwise idle (no music/OSD).
   static let agentNotchIndicator = Key<Bool>("agentNotchIndicator", default: true)

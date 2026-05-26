@@ -31,6 +31,15 @@ final class AgentMonitorManager: ObservableObject {
   private var started = false
   private var maintenanceTimer: Timer?
 
+  /// E2: in-flight interactive permission requests awaiting an Allow/Deny, keyed
+  /// by a generated id. Each holds the continuation that unblocks the bridge.
+  private struct PendingPermission {
+    let id: String
+    let sessionKey: String
+    let continuation: CheckedContinuation<PermissionDecision, Never>
+  }
+  private var pendingPermissions: [String: PendingPermission] = [:]
+
   /// Drop idle (`waiting`/`done`) sessions after this long with no activity —
   /// a safety net for sessions that never send a `session_end`. (The idle and
   /// stall thresholds are user-configurable; see `Defaults.Keys`.)
@@ -223,6 +232,85 @@ final class AgentMonitorManager: ObservableObject {
     case .unknown:
       logger.debug("unknown event type ignored for session: \(key, privacy: .public)")
     }
+  }
+
+  // MARK: - Interactive permission (E2)
+
+  /// Decide an incoming `permission_request`. Called by EventReceiver, which
+  /// holds the bridge connection open until this returns.
+  ///
+  /// Returns `.allow`/`.deny` only from an explicit user click in the notch.
+  /// Every other path — interactive mode OFF, timeout, no decision — returns
+  /// `.deferred`, which makes the bridge emit no stdout so Claude Code's own
+  /// terminal permission prompt applies. We NEVER auto-allow.
+  func requestPermissionDecision(event: Event) async -> PermissionDecision {
+    let key = sessionKey(for: event)
+    let (tool, inputSummary) = Self.permissionDetails(from: event.payload)
+
+    var s = adoptedSession(key: key, event: event)
+    if let tool { s.lastTool = tool }
+    let wasNeedInput = s.status == .needInput
+    s.status = .needInput
+    s.lastActivity = .init()
+
+    guard Defaults[.agentInteractivePermissions] else {
+      // Observe-only (E1 behaviour): surface "need input", defer the decision.
+      s.pendingPermissionId = nil
+      sessions[key] = s
+      logger.debug("permission (observe-only → defer): \(key, privacy: .public)")
+      if !wasNeedInput { emitAlert(for: s) }
+      return .deferred
+    }
+
+    let id = UUID().uuidString
+    s.pendingPermissionId = id
+    s.pendingInputSummary = inputSummary
+    sessions[key] = s
+    logger.debug(
+      "permission pending (interactive): \(key, privacy: .public) tool=\(tool ?? "?", privacy: .public)")
+    emitAlert(for: s)
+
+    let timeout = max(1, Defaults[.agentDecisionTimeout])
+    return await withCheckedContinuation { (cont: CheckedContinuation<PermissionDecision, Never>) in
+      pendingPermissions[id] = PendingPermission(id: id, sessionKey: key, continuation: cont)
+      // Safety net: if the user never decides, defer to the terminal prompt.
+      Task { @MainActor [weak self] in
+        try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+        self?.resolvePermission(id: id, decision: .deferred, viaTimeout: true)
+      }
+    }
+  }
+
+  /// Resolve a pending interactive permission (user click, or the timeout
+  /// safety net). No-op if already resolved.
+  func resolvePermission(id: String, decision: PermissionDecision, viaTimeout: Bool = false) {
+    guard let pending = pendingPermissions.removeValue(forKey: id) else { return }
+    pending.continuation.resume(returning: decision)
+    if var s = sessions[pending.sessionKey], s.pendingPermissionId == id {
+      s.pendingPermissionId = nil
+      s.pendingInputSummary = nil
+      if decision == .allow { s.status = .working }  // the tool will now run
+      s.lastActivity = .init()
+      sessions[pending.sessionKey] = s
+    }
+    logger.debug(
+      "permission resolved: \(id, privacy: .public) → \(decision.rawValue, privacy: .public) timeout=\(viaTimeout, privacy: .public)"
+    )
+  }
+
+  /// Pull a tool name and a short input summary out of a PermissionRequest
+  /// payload for display (best-effort).
+  private static func permissionDetails(from payload: JSONValue) -> (tool: String?, input: String?) {
+    guard case .object(let obj) = payload else { return (nil, nil) }
+    var tool: String?
+    if case .string(let t) = obj["tool_name"] { tool = t }
+    var input: String?
+    if case .object(let inObj) = obj["tool_input"] {
+      if case .string(let c) = inObj["command"] { input = c }
+      else if case .string(let f) = inObj["file_path"] { input = f }
+      else if case .string(let p) = inObj["path"] { input = p }
+    }
+    return (tool, input)
   }
 
   // MARK: - Private

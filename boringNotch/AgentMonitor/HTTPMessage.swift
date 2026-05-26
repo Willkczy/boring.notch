@@ -78,4 +78,21 @@ enum HTTPMessage {
 
   /// 400 Bad Request — malformed JSON or HTTP.
   static let badRequest = response(status: 400, reason: "Bad Request")
+
+  /// 200 OK carrying an interactive permission decision (E2). Body is
+  /// `{"behavior":"allow"|"deny"|"defer"}`; the bridge reads `.behavior` and
+  /// emits Claude Code's PermissionRequest stdout JSON (or nothing, for defer).
+  static func decision(_ decision: PermissionDecision) -> Data {
+    let behavior: String
+    switch decision {
+    case .allow: behavior = "allow"
+    case .deny: behavior = "deny"
+    case .deferred: behavior = "defer"
+    }
+    let body = Data("{\"behavior\":\"\(behavior)\"}".utf8)
+    let head =
+      "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+      + "Content-Length: \(body.count)\r\nConnection: close\r\n\r\n"
+    return Data(head.utf8) + body
+  }
 }

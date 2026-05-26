@@ -52,9 +52,10 @@ cp "$CLAUDE_SETTINGS" "${CLAUDE_SETTINGS}.bak.$(date +%s)"
 #   SubagentStop      subagent_stop      → ignored
 #   SessionEnd        session_end        → removed
 #
-# All entries are fire-and-forget (E1): permission_request only *observes*.
-# Claude Code still shows its own terminal permission prompt because the hook
-# exits 0 with no stdout. (Phase E2 adds an opt-in blocking variant.)
+# All entries are fire-and-forget except permission_request, which BLOCKS on
+# the app's Allow/Deny decision (E2). When the app's interactive toggle is OFF,
+# or it times out / is down, the app/bridge defer — Claude Code shows its own
+# terminal permission prompt (hook exits 0 with no stdout). Never auto-allow.
 TMP="$(mktemp)"
 jq --arg bridge "$INSTALL_TARGET" '
   # Helper: a single hook entry that calls our bridge with a given event name
@@ -62,6 +63,17 @@ jq --arg bridge "$INSTALL_TARGET" '
     hooks: [{
       type: "command",
       command: ($bridge + " " + name)
+    }]
+  };
+
+  # Variant with a timeout (seconds). PermissionRequest BLOCKS waiting for an
+  # in-notch decision, so its hook timeout must exceed the bridge curl timeout
+  # (125s) which in turn exceeds the app decision timeout (default 120s).
+  def entryT(name; t): {
+    hooks: [{
+      type: "command",
+      command: ($bridge + " " + name),
+      timeout: t
     }]
   };
 
@@ -76,7 +88,7 @@ jq --arg bridge "$INSTALL_TARGET" '
   | .hooks.UserPromptSubmit  = (stripNotch(.hooks.UserPromptSubmit)  + [entry("user_prompt")])
   | .hooks.PreToolUse        = (stripNotch(.hooks.PreToolUse)        + [entry("pre_tool")])
   | .hooks.PostToolUse       = (stripNotch(.hooks.PostToolUse)       + [entry("post_tool")])
-  | .hooks.PermissionRequest = (stripNotch(.hooks.PermissionRequest) + [entry("permission_request")])
+  | .hooks.PermissionRequest = (stripNotch(.hooks.PermissionRequest) + [entryT("permission_request"; 130)])
   | .hooks.Notification      = (stripNotch(.hooks.Notification)      + [entry("waiting")])
   | .hooks.Stop              = (stripNotch(.hooks.Stop)              + [entry("stop")])
   | .hooks.SubagentStop      = (stripNotch(.hooks.SubagentStop)      + [entry("subagent_stop")])

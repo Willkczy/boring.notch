@@ -59,43 +59,86 @@ private struct AgentSessionRow: View {
   private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
   var body: some View {
-    HStack(spacing: 8) {
-      Circle()
-        .fill(session.status.color)
-        .frame(width: 8, height: 8)
+    VStack(alignment: .leading, spacing: 6) {
+      HStack(spacing: 8) {
+        Circle()
+          .fill(session.status.color)
+          .frame(width: 8, height: 8)
 
-      VStack(alignment: .leading, spacing: 2) {
-        HStack(spacing: 4) {
-          Text(session.source.rawValue)
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-          Text(session.cwdBasename)
-            .font(.caption)
-            .fontWeight(.medium)
-            .foregroundStyle(.white)
-            .lineLimit(1)
+        VStack(alignment: .leading, spacing: 2) {
+          HStack(spacing: 4) {
+            Text(session.source.rawValue)
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+            Text(session.cwdBasename)
+              .font(.caption)
+              .fontWeight(.medium)
+              .foregroundStyle(.white)
+              .lineLimit(1)
+          }
+          if let tool = session.lastTool {
+            Text(tool)
+              .font(.caption2)
+              .foregroundStyle(.tertiary)
+          }
         }
-        if let tool = session.lastTool {
-          Text(tool)
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-        }
+
+        Spacer()
+
+        Text(session.status.label)
+          .font(.caption2)
+          .foregroundStyle(session.status.color)
+        Text(formatElapsed(elapsed))
+          .font(.caption2.monospacedDigit())
+          .foregroundStyle(.secondary)
       }
 
-      Spacer()
-
-      Text(session.status.label)
-        .font(.caption2)
-        .foregroundStyle(session.status.color)
-      Text(formatElapsed(elapsed))
-        .font(.caption2.monospacedDigit())
-        .foregroundStyle(.secondary)
+      // E2: interactive Allow/Deny when this session is awaiting a permission.
+      if let pendingId = session.pendingPermissionId {
+        decisionBar(pendingId: pendingId)
+      }
     }
     .padding(.vertical, 6)
     .padding(.horizontal, 8)
     .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
     .onAppear { elapsed = -session.startedAt.timeIntervalSinceNow }
     .onReceive(timer) { _ in elapsed = -session.startedAt.timeIntervalSinceNow }
+  }
+
+  @ViewBuilder
+  private func decisionBar(pendingId: String) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      // Show exactly what is being authorized (security: no truncation of the
+      // decision-relevant input beyond a generous limit).
+      Text("Permission: \(session.lastTool ?? "tool")")
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(.orange)
+      if let input = session.pendingInputSummary, !input.isEmpty {
+        Text(input)
+          .font(.caption2.monospaced())
+          .foregroundStyle(.white.opacity(0.85))
+          .lineLimit(3)
+          .textSelection(.enabled)
+      }
+      HStack(spacing: 6) {
+        Button("Allow") {
+          AgentMonitorManager.shared.resolvePermission(id: pendingId, decision: .allow)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(.green)
+        .controlSize(.small)
+
+        Button("Deny") {
+          AgentMonitorManager.shared.resolvePermission(id: pendingId, decision: .deny)
+        }
+        .buttonStyle(.bordered)
+        .tint(.red)
+        .controlSize(.small)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(8)
+    .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
   }
 
   private func formatElapsed(_ s: TimeInterval) -> String {
