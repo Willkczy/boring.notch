@@ -17,11 +17,14 @@ enum SessionStatus: Sendable, Equatable {
   case needInput
   case tempDone
 
-  /// SwiftUI color for the status dot. Both attention states are orange.
+  /// SwiftUI color for the status dot, everywhere (Agents tab + collapsed
+  /// glance): working green / needInput orange / tempDone blue. Distinct per
+  /// state so a glance tells "needs you" from "finished".
   var color: Color {
     switch self {
     case .working: .green
-    case .needInput, .tempDone: .orange
+    case .needInput: .orange
+    case .tempDone: .blue
     }
   }
 

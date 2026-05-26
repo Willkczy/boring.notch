@@ -98,6 +98,18 @@ struct ContentView: View {
             && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed
         {
             chinWidth += (2 * max(0, displayClosedNotchHeight - 12) + 20 + 2 * liveActivityEdgeMargin + 2)
+            // Extra room so the agent dots fit to the right of the spectrum.
+            if agentManager.hasActiveSessions && Defaults[.agentNotchIndicator] {
+                chinWidth += 56
+            }
+        } else if !coordinator.expandingView.show && vm.notchState == .closed
+            && (!musicManager.isPlaying && musicManager.isPlayerIdle)
+            && agentManager.hasActiveSessions && Defaults[.agentNotchIndicator]
+            && !vm.hideOnClosed
+        {
+            // Widen the chin so the agent status dots have a visible spot beside
+            // the notch (same region the music album art / face use).
+            chinWidth += (2 * max(0, displayClosedNotchHeight - 12) + 20)
         } else if !coordinator.expandingView.show && vm.notchState == .closed
             && (!musicManager.isPlaying && musicManager.isPlayerIdle) && Defaults[.showNotHumanFace]
             && !vm.hideOnClosed
@@ -139,16 +151,6 @@ struct ContentView: View {
                             .fill(.black)
                             .frame(height: 1)
                             .padding(.horizontal, topCornerRadius)
-                    }
-                    // Glance-able agent status dot, pinned under the camera on the
-                    // closed notch. Drawn after clipShape so it isn't masked, and
-                    // independent of the content branches so it shows over music too.
-                    .overlay(alignment: .bottom) {
-                        if vm.notchState == .closed && agentManager.hasActiveSessions
-                            && Defaults[.agentNotchIndicator] {
-                            AgentNotchIndicator()
-                                .padding(.bottom, 3)
-                        }
                     }
                     .shadow(
                         color: ((vm.notchState == .open || isHovering) && Defaults[.enableShadow])
@@ -345,6 +347,8 @@ struct ContentView: View {
                       } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .music) && vm.notchState == .closed && (musicManager.isPlaying || !musicManager.isPlayerIdle) && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed {
                           MusicLiveActivity()
                               .frame(alignment: .center)
+                      } else if !coordinator.expandingView.show && vm.notchState == .closed && (!musicManager.isPlaying && musicManager.isPlayerIdle) && agentManager.hasActiveSessions && Defaults[.agentNotchIndicator] && !vm.hideOnClosed {
+                          AgentLiveActivity()
                       } else if !coordinator.expandingView.show && vm.notchState == .closed && (!musicManager.isPlaying && musicManager.isPlayerIdle) && Defaults[.showNotHumanFace] && !vm.hideOnClosed  {
                           BoringFaceAnimation()
                        } else if vm.notchState == .open {
@@ -442,6 +446,21 @@ struct ContentView: View {
             height: displayClosedNotchHeight,
             alignment: .center
         )
+    }
+
+    @ViewBuilder
+    func AgentLiveActivity() -> some View {
+        HStack(spacing: 0) {
+            // Black spacer the width of the physical notch; the status dots sit
+            // in the right chin — the same visible region the music album art
+            // and the idle face use, so they read at a glance.
+            Rectangle()
+                .fill(.black)
+                .frame(width: vm.closedNotchSize.width + 20)
+            AgentNotchIndicator()
+                .padding(.trailing, 8)
+        }
+        .frame(height: displayClosedNotchHeight, alignment: .center)
     }
 
     @ViewBuilder
@@ -544,6 +563,14 @@ struct ContentView: View {
                 ),
                 alignment: .center
             )
+
+            // Agent status dots share the music chin so the glance persists
+            // while music plays (the chin is widened for them in computedChinWidth).
+            if agentManager.hasActiveSessions && Defaults[.agentNotchIndicator] {
+                AgentNotchIndicator()
+                    .padding(.leading, 6)
+                    .padding(.trailing, 2)
+            }
         }
         .frame(
             height: displayClosedNotchHeight,

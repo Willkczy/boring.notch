@@ -4,9 +4,9 @@
 //
 //  Collapsed (closed-notch) status indicator: one coloured dot per status
 //  present across live sessions (green working / orange need-input /
-//  orange temp-done), with a count when a status has more than one session. Rendered as
-//  an overlay on the closed notch (under the camera) so it stays visible
-//  regardless of music / OSD content.
+//  blue temp-done), with a count when a status has more than one session.
+//  Rendered as a chin element beside the physical notch (see ContentView's
+//  AgentLiveActivity / MusicLiveActivity) so it reads at a glance.
 //
 
 import SwiftUI
