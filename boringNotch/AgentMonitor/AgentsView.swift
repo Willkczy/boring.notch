@@ -16,6 +16,9 @@ import SwiftUI
 
 struct AgentsView: View {
   @ObservedObject var manager = AgentMonitorManager.shared
+  /// When set (and the session still exists), show its transcript instead of
+  /// the list (F2).
+  @State private var expandedSessionId: String?
 
   private var sortedSessions: [Session] {
     manager.sessions.values.sorted { $0.startedAt < $1.startedAt }
@@ -23,7 +26,9 @@ struct AgentsView: View {
 
   var body: some View {
     Group {
-      if sortedSessions.isEmpty {
+      if let id = expandedSessionId, let session = manager.sessions[id] {
+        AgentConversationView(session: session, onBack: { expandedSessionId = nil })
+      } else if sortedSessions.isEmpty {
         VStack(spacing: 6) {
           Image(systemName: "terminal")
             .font(.title2)
@@ -36,9 +41,13 @@ struct AgentsView: View {
         ScrollView {
           VStack(spacing: 4) {
             ForEach(sortedSessions) { session in
-              AgentSessionRow(session: session, prompt: manager.pendingPrompt(for: session.id))
-                .contentShape(Rectangle())
-                .onTapGesture { focusTerminal(hostPid: session.hostPid, fallbackPid: session.pid) }
+              AgentSessionRow(
+                session: session,
+                prompt: manager.pendingPrompt(for: session.id),
+                onExpand: { expandedSessionId = session.id }
+              )
+              .contentShape(Rectangle())
+              .onTapGesture { focusTerminal(hostPid: session.hostPid, fallbackPid: session.pid) }
             }
           }
           .padding(.horizontal, 8)
@@ -58,6 +67,8 @@ private struct AgentSessionRow: View {
   /// Live pending permission for this session (nil when none) — drives the
   /// Allow/Deny bar straight from the manager's source of truth.
   let prompt: AgentMonitorManager.PendingPrompt?
+  /// Open this session's transcript view.
+  let onExpand: () -> Void
   @State private var elapsed: TimeInterval = 0
   private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -99,6 +110,14 @@ private struct AgentSessionRow: View {
         Text(formatElapsed(elapsed))
           .font(.caption2.monospacedDigit())
           .foregroundStyle(.secondary)
+        // Open the transcript view. Its own tap, so it doesn't trigger the
+        // row's focus-terminal gesture.
+        Button(action: onExpand) {
+          Image(systemName: "bubble.left.and.text.bubble.right")
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
       }
 
       // E2: interactive Allow/Deny while this session is awaiting a permission.
