@@ -101,16 +101,16 @@ struct ContentView: View {
             // Room for the dots on the right PLUS an equal left balance spacer
             // (keeps the music centered on the notch — see MusicLiveActivity).
             if agentManager.hasActiveSessions && Defaults[.agentNotchIndicator] {
-                chinWidth += 2 * (8 + AgentNotchIndicator.glanceWidth)
+                chinWidth += 2 * (8 + AgentNotchIndicator.glanceWidth(statusCount: agentManager.activeStatusGroupCount))
             }
         } else if !coordinator.expandingView.show && vm.notchState == .closed
             && (!musicManager.isPlaying && musicManager.isPlayerIdle)
             && agentManager.hasActiveSessions && Defaults[.agentNotchIndicator]
             && !vm.hideOnClosed
         {
-            // Widen the chin to fit the notch-cover (+20) plus the fixed-width
-            // crab+indicator glance, so it never clips off the leading edge.
-            chinWidth += (32 + AgentNotchIndicator.glanceWidth)
+            // Widen the chin to fit the notch-cover (+20) plus the crab + one
+            // cell per present status, so the glance never clips off the leading edge.
+            chinWidth += (32 + AgentNotchIndicator.glanceWidth(statusCount: agentManager.activeStatusGroupCount))
         } else if !coordinator.expandingView.show && vm.notchState == .closed
             && (!musicManager.isPlaying && musicManager.isPlayerIdle) && Defaults[.showNotHumanFace]
             && !vm.hideOnClosed
@@ -477,7 +477,7 @@ struct ContentView: View {
         HStack(spacing: 0) {
             let agentDots = agentManager.hasActiveSessions && Defaults[.agentNotchIndicator]
             let agentDotsWidth: CGFloat =
-                agentDots ? AgentNotchIndicator.glanceWidth + 8 : 0
+                agentDots ? AgentNotchIndicator.glanceWidth(statusCount: agentManager.activeStatusGroupCount) + 8 : 0
             // Left balance spacer: keeps the album art + spectrum centered on the
             // physical notch when the agent dots are appended on the right.
             // Without it the centered content shifts left and the spectrum slides
