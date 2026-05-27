@@ -88,6 +88,12 @@ final class AgentMonitorManager: ObservableObject {
   /// True when any session is being tracked — drives Agents-tab visibility (Phase B).
   var hasActiveSessions: Bool { !sessions.isEmpty }
 
+  /// True when any tracked session is from `source` — drives per-source tab
+  /// visibility (Claude tab vs Codex tab).
+  func hasSessions(source: EventSource) -> Bool {
+    sessions.values.contains { $0.source == source }
+  }
+
   /// Number of distinct statuses present across sessions = number of dots the
   /// collapsed glance renders. Used to size the notch chin so none clip.
   var activeStatusGroupCount: Int { Set(sessions.values.map(\.status)).count }

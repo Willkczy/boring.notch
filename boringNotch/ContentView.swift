@@ -425,7 +425,11 @@ struct ContentView: View {
                     case .shelf:
                         ShelfView()
                     case .agents:
-                        AgentsView(onExpandChange: { expanded in
+                        AgentsView(source: .claude, onExpandChange: { expanded in
+                            vm.setAgentExpanded(expanded ? 420 : nil)
+                        })
+                    case .codex:
+                        AgentsView(source: .codex, onExpandChange: { expanded in
                             vm.setAgentExpanded(expanded ? 420 : nil)
                         })
                     }
@@ -438,6 +442,16 @@ struct ContentView: View {
                 .zIndex(1)
                 .allowsHitTesting(vm.notchState == .open)
                 .opacity(gestureProgress != 0 ? 1.0 - min(abs(gestureProgress) * 0.1, 0.3) : 1.0)
+                // If the selected agent tab loses all its sessions (e.g. its tab
+                // chip disappears), fall back to the other agent tab or Home so
+                // the user isn't stranded on a hidden tab.
+                .onChange(of: agentManager.sessions.count) { _, _ in
+                    if coordinator.currentView == .agents, !agentManager.hasSessions(source: .claude) {
+                        coordinator.currentView = agentManager.hasSessions(source: .codex) ? .codex : .home
+                    } else if coordinator.currentView == .codex, !agentManager.hasSessions(source: .codex) {
+                        coordinator.currentView = agentManager.hasSessions(source: .claude) ? .agents : .home
+                    }
+                }
             }
         }
         .onDrop(of: [.fileURL, .url, .utf8PlainText, .plainText, .data], delegate: GeneralDropTargetDelegate(isTargeted: $vm.generalDropTargeting))

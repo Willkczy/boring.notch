@@ -16,6 +16,8 @@ import SwiftUI
 struct AgentsView: View {
   @ObservedObject var manager = AgentMonitorManager.shared
   @ObservedObject var sessionMonitor = AgentSessionMonitor.shared
+  /// Which agent this tab shows (Claude vs Codex). Sessions are filtered to it.
+  var source: EventSource = .claude
   /// Called when the transcript opens (true) / closes (false) so the notch can
   /// grow/restore its window (F4b).
   var onExpandChange: (Bool) -> Void = { _ in }
@@ -26,7 +28,7 @@ struct AgentsView: View {
   var body: some View {
     Group {
       if let id = expandedSessionId,
-        let state = sessionMonitor.instances.first(where: { $0.sessionId == id })
+        let state = sessionMonitor.instances.first(where: { $0.sessionId == id && $0.source == source })
       {
         // Vibe-notch chat/transcript view (ported). History is parsed from the
         // session's JSONL by ChatHistoryManager + watched live.
@@ -42,7 +44,8 @@ struct AgentsView: View {
           sessionMonitor: sessionMonitor,
           onOpenChat: { expandedSessionId = $0.sessionId },
           onFocus: { focusSession($0) },
-          canFocus: { canFocus($0) }
+          canFocus: { canFocus($0) },
+          sourceFilter: source
         )
       }
     }
@@ -82,18 +85,20 @@ struct AgentsView: View {
 /// `hostPid` (a stable GUI-app pid that outlives the hook); falls back to
 /// walking one level up from the event pid for older bridges.
 private func focusTerminal(hostPid: Int?, fallbackPid: Int) {
-  if let hostPid, hostPid > 1,
-    let app = NSRunningApplication(processIdentifier: pid_t(hostPid))
-  {
-    app.activate(options: [.activateAllWindows])
-    return
+  // Try the stable host pid first; if it doesn't resolve to a runnable app or
+  // activation is refused, fall back to walking up from the (transient) event
+  // pid. unhide() + activate(); `.activateAllWindows` brings all its windows
+  // forward. We try each candidate and stop at the first that activates.
+  func bringForward(_ pid: pid_t) -> Bool {
+    guard pid > 1, let app = NSRunningApplication(processIdentifier: pid) else { return false }
+    app.unhide()
+    return app.activate(options: [.activateAllWindows])
   }
-  guard
-    fallbackPid > 1,
-    let ppid = parentPID(of: pid_t(fallbackPid)),
-    let app = NSRunningApplication(processIdentifier: ppid)
-  else { return }
-  app.activate(options: [.activateAllWindows])
+
+  if let hostPid, hostPid > 1, bringForward(pid_t(hostPid)) { return }
+  if fallbackPid > 1, let ppid = parentPID(of: pid_t(fallbackPid)) {
+    _ = bringForward(ppid)
+  }
 }
 
 private func parentPID(of pid: pid_t) -> pid_t? {

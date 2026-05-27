@@ -16,6 +16,9 @@ struct SessionState: Equatable, Identifiable, Sendable {
     let sessionId: String
     let cwd: String
     let projectName: String
+    /// Which agent produced this session (drives the Claude vs Codex tab split
+    /// and which transcript parser to use). boringNotch addition.
+    var source: EventSource = .claude
 
     // MARK: - Instance Metadata
 
@@ -66,6 +69,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         sessionId: String,
         cwd: String,
         projectName: String? = nil,
+        source: EventSource = .claude,
         pid: Int? = nil,
         tty: String? = nil,
         isInTmux: Bool = false,
@@ -84,6 +88,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
         self.sessionId = sessionId
         self.cwd = cwd
         self.projectName = projectName ?? URL(fileURLWithPath: cwd).lastPathComponent
+        self.source = source
         self.pid = pid
         self.tty = tty
         self.isInTmux = isInTmux

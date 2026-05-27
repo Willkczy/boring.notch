@@ -70,7 +70,9 @@ final class AgentSessionMonitor: ObservableObject {
                 lastToolName: nil, firstUserMessage: nil, lastUserMessageDate: nil
             )
             if let path = session.transcriptPath {
-                info = await parser.parseInfo(filePath: path)
+                info = session.source == .codex
+                    ? await CodexConversationParser.shared.parseInfo(filePath: path)
+                    : await parser.parseInfo(filePath: path)
             }
             // Fall back to the manager's parsed title when the transcript has no
             // first-user-message yet (keeps the row from showing only the dir).
@@ -91,6 +93,7 @@ final class AgentSessionMonitor: ObservableObject {
                     sessionId: session.id,
                     cwd: session.cwd,
                     projectName: session.cwdBasename,
+                    source: session.source,
                     pid: session.pid,
                     tty: session.tty,
                     // A non-empty tmux pane tty (from the bridge) is our "in tmux"

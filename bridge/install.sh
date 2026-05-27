@@ -98,7 +98,21 @@ mv "$TMP" "$CLAUDE_SETTINGS"
 echo "✓ Updated $CLAUDE_SETTINGS"
 
 # --- Codex ---------------------------------------------------------------
-# Codex has no PermissionRequest hook; only wire the events it supports.
+# Codex supports a full Claude-style hooks system, but with two differences
+# this wiring must respect:
+#   1. hooks.json is nested under a top-level `hooks` key — `{"hooks":{...}}` —
+#      NOT events at the root. (Root-level events are silently ignored.)
+#   2. Codex passes session_id / transcript_path on the hook's STDIN JSON, not
+#      via env vars, and may not set CLAUDE_*/CODEX_* env at all. So we pass an
+#      explicit source arg ("codex") as $2 and the bridge reads session_id from
+#      the payload.
+# Codex also has PermissionRequest (same decision JSON as Claude) → wire it
+# blocking, like Claude. No Notification/SessionEnd events exist in Codex, so
+# those rows rely on the app's idle-TTL prune.
+#
+# NOTE: Codex requires hook *trust* — after install, run `/hooks` inside Codex
+# to review and trust the notch-bridge hook (or start codex with
+# `--dangerously-bypass-hook-trust`), else Codex skips it.
 
 CODEX_HOOKS="$HOME/.codex/hooks.json"
 mkdir -p "$(dirname "$CODEX_HOOKS")"
@@ -108,10 +122,20 @@ cp "$CODEX_HOOKS" "${CODEX_HOOKS}.bak.$(date +%s)"
 
 TMP="$(mktemp)"
 jq --arg bridge "$INSTALL_TARGET" '
+  # Codex entries pass an explicit "codex" source arg so the bridge tags the
+  # event correctly without relying on env detection.
   def entry(name): {
     hooks: [{
       type: "command",
-      command: ($bridge + " " + name)
+      command: ($bridge + " " + name + " codex")
+    }]
+  };
+
+  def entryT(name; t): {
+    hooks: [{
+      type: "command",
+      command: ($bridge + " " + name + " codex"),
+      timeout: t
     }]
   };
 
@@ -120,11 +144,14 @@ jq --arg bridge "$INSTALL_TARGET" '
       .hooks |= map(select((.command // "") | contains("notch-bridge.sh") | not))
     ) | map(select((.hooks | length) > 0));
 
-  .SessionStart  = (stripNotch(.SessionStart)  + [entry("session_start")])
-  | .PreToolUse  = (stripNotch(.PreToolUse)    + [entry("pre_tool")])
-  | .PostToolUse = (stripNotch(.PostToolUse)   + [entry("post_tool")])
-  | .Stop        = (stripNotch(.Stop)          + [entry("stop")])
-  | .SubagentStop= (stripNotch(.SubagentStop)  + [entry("subagent_stop")])
+  .hooks //= {}
+  | .hooks.SessionStart      = (stripNotch(.hooks.SessionStart)      + [entry("session_start")])
+  | .hooks.UserPromptSubmit  = (stripNotch(.hooks.UserPromptSubmit)  + [entry("user_prompt")])
+  | .hooks.PreToolUse        = (stripNotch(.hooks.PreToolUse)        + [entry("pre_tool")])
+  | .hooks.PostToolUse       = (stripNotch(.hooks.PostToolUse)       + [entry("post_tool")])
+  | .hooks.PermissionRequest = (stripNotch(.hooks.PermissionRequest) + [entryT("permission_request"; 130)])
+  | .hooks.Stop              = (stripNotch(.hooks.Stop)              + [entry("stop")])
+  | .hooks.SubagentStop      = (stripNotch(.hooks.SubagentStop)      + [entry("subagent_stop")])
 ' "$CODEX_HOOKS" > "$TMP"
 mv "$TMP" "$CODEX_HOOKS"
 echo "✓ Updated $CODEX_HOOKS"

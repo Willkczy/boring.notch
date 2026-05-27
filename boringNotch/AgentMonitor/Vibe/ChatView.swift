@@ -118,7 +118,7 @@ struct ChatView: View {
             }
 
             // Load in background, show loading state
-            await ChatHistoryManager.shared.loadFromFile(sessionId: sessionId, cwd: session.cwd)
+            await ChatHistoryManager.shared.loadFromFile(sessionId: sessionId, cwd: session.cwd, source: session.source)
             history = ChatHistoryManager.shared.history(for: sessionId)
 
             withAnimation(.easeOut(duration: 0.2)) {
@@ -350,9 +350,14 @@ struct ChatView: View {
         session.isInTmux && session.tty != nil
     }
 
+    /// Short agent name for the "Message …" placeholder.
+    private var agentShortName: String { session.source == .codex ? "Codex" : "Claude" }
+    /// Full agent name for the tmux hint.
+    private var agentFullName: String { session.source == .codex ? "Codex" : "Claude Code" }
+
     private var inputBar: some View {
         HStack(spacing: 10) {
-            TextField(canSendMessages ? "Message Claude..." : "Open Claude Code in tmux to enable messaging", text: $inputText)
+            TextField(canSendMessages ? "Message \(agentShortName)..." : "Open \(agentFullName) in tmux to enable messaging", text: $inputText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .foregroundColor(canSendMessages ? .white : .white.opacity(0.4))

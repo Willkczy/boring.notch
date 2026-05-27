@@ -23,9 +23,16 @@ struct ClaudeInstancesView: View {
     var onFocus: (SessionState) -> Void
     /// Whether this session can be focused (drives the focus/terminal buttons).
     var canFocus: (SessionState) -> Bool
+    /// Show only sessions from this source (nil = all). Splits Claude vs Codex tabs.
+    var sourceFilter: EventSource? = nil
+
+    /// Sessions for this tab (source-filtered).
+    private var filteredInstances: [SessionState] {
+        sessionMonitor.instances.filter { sourceFilter == nil || $0.source == sourceFilter }
+    }
 
     var body: some View {
-        if sessionMonitor.instances.isEmpty {
+        if filteredInstances.isEmpty {
             emptyState
         } else {
             instancesList
@@ -40,7 +47,7 @@ struct ClaudeInstancesView: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(.white.opacity(0.4))
 
-            Text("Run claude in terminal")
+            Text(sourceFilter == .codex ? "Run codex in terminal" : "Run claude in terminal")
                 .font(.system(size: 11))
                 .foregroundColor(.white.opacity(0.25))
         }
@@ -52,7 +59,7 @@ struct ClaudeInstancesView: View {
     /// Priority: active (approval/processing/compacting) > waitingForInput > idle
     /// Secondary sort: by last user message date (stable - doesn't change when agent responds)
     private var sortedInstances: [SessionState] {
-        sessionMonitor.instances.sorted { a, b in
+        filteredInstances.sorted { a, b in
             let priorityA = phasePriority(a.phase)
             let priorityB = phasePriority(b.phase)
             if priorityA != priorityB {

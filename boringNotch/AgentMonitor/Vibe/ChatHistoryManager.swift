@@ -31,6 +31,8 @@ final class ChatHistoryManager: ObservableObject {
     /// Resolved transcript path per session (the hook-provided path, which is
     /// authoritative; the derived cwd+sessionId path is only a fallback).
     private var paths: [String: String] = [:]
+    /// Agent source per session — picks the transcript parser (Claude vs Codex).
+    private var sources: [String: EventSource] = [:]
     /// Active file watchers keyed by session id.
     private var watchers: [String: TranscriptFileWatcher] = [:]
 
@@ -48,13 +50,14 @@ final class ChatHistoryManager: ObservableObject {
 
     /// Initial load: parse the transcript, assemble items, then start watching the
     /// file for live updates. Idempotent.
-    func loadFromFile(sessionId: String, cwd: String) async {
+    func loadFromFile(sessionId: String, cwd: String, source: EventSource = .claude) async {
         cwds[sessionId] = cwd
+        sources[sessionId] = source
         let path = resolvePath(sessionId: sessionId, cwd: cwd)
         paths[sessionId] = path
-        await rebuild(sessionId: sessionId, path: path, cwd: cwd)
+        await rebuild(sessionId: sessionId, path: path, cwd: cwd, source: source)
         loadedSessions.insert(sessionId)
-        startWatching(sessionId: sessionId, path: path, cwd: cwd)
+        startWatching(sessionId: sessionId, path: path, cwd: cwd, source: source)
     }
 
     /// Drop a session's history + stop its watcher.
@@ -64,6 +67,7 @@ final class ChatHistoryManager: ObservableObject {
         loadedSessions.remove(sessionId)
         cwds.removeValue(forKey: sessionId)
         paths.removeValue(forKey: sessionId)
+        sources.removeValue(forKey: sessionId)
         histories.removeValue(forKey: sessionId)
         agentDescriptions.removeValue(forKey: sessionId)
     }
@@ -84,20 +88,20 @@ final class ChatHistoryManager: ObservableObject {
         return ConversationParser.transcriptFilePath(sessionId: sessionId, cwd: cwd)
     }
 
-    private func rebuild(sessionId: String, path: String, cwd: String) async {
-        let result = await ChatHistoryBuilder.build(sessionId: sessionId, filePath: path, cwd: cwd)
+    private func rebuild(sessionId: String, path: String, cwd: String, source: EventSource) async {
+        let result = await ChatHistoryBuilder.build(sessionId: sessionId, filePath: path, cwd: cwd, source: source)
         histories[sessionId] = Self.filterOutSubagentTools(result.items)
         agentDescriptions[sessionId] = result.agentDescriptions
     }
 
-    private func startWatching(sessionId: String, path: String, cwd: String) {
+    private func startWatching(sessionId: String, path: String, cwd: String, source: EventSource) {
         watchers[sessionId]?.stop()
         let watcher = TranscriptFileWatcher(path: path) { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
                 // Re-resolve in case the path changed (rare), else reuse.
                 let p = self.paths[sessionId] ?? path
-                await self.rebuild(sessionId: sessionId, path: p, cwd: cwd)
+                await self.rebuild(sessionId: sessionId, path: p, cwd: cwd, source: source)
             }
         }
         watchers[sessionId] = watcher
@@ -132,7 +136,14 @@ enum ChatHistoryBuilder {
         let agentDescriptions: [String: String]
     }
 
-    static func build(sessionId: String, filePath: String, cwd: String) async -> Result {
+    static func build(sessionId: String, filePath: String, cwd: String, source: EventSource = .claude) async -> Result {
+        // Codex transcripts use a different schema → dedicated parser. It maps
+        // to the same ChatHistoryItem models so the views render unchanged.
+        if source == .codex {
+            let items = await CodexConversationParser.shared.build(filePath: filePath)
+            return Result(items: items, agentDescriptions: [:])
+        }
+
         let parser = ConversationParser.shared
 
         // Reset incremental state so we always parse the whole file fresh.

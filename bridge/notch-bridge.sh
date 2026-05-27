@@ -18,14 +18,21 @@
 set -u  # don't set -e: we want to fall through errors silently
 
 EVENT="${1:-unknown}"
+# Optional explicit source from the hook wiring (Codex passes "codex" as $2,
+# since Codex doesn't reliably set CLAUDE_*/CODEX_* env in hooks). Claude hooks
+# omit it and are detected via env below.
+SOURCE_ARG="${2:-}"
 PORT="${NOTCH_AGENT_PORT:-7878}"
 ENDPOINT="http://127.0.0.1:${PORT}/event"
 TIMEOUT="${NOTCH_AGENT_TIMEOUT:-1}"
 
-# Detect source from the script's invocation context.
-# Claude Code hooks set CLAUDE_* env vars; Codex sets CODEX_*. Fall back
-# to "unknown" if neither is present.
-if [ -n "${CLAUDE_SESSION_ID:-}${CLAUDE_PROJECT_DIR:-}" ]; then
+# Detect source. An explicit arg ($2) wins (Codex); else fall back to env
+# detection (Claude sets CLAUDE_*). session_id is filled from env when present,
+# otherwise from the stdin payload below (Codex delivers it on stdin, not env).
+if [ -n "$SOURCE_ARG" ]; then
+    SOURCE="$SOURCE_ARG"
+    SESSION_ID=""
+elif [ -n "${CLAUDE_SESSION_ID:-}${CLAUDE_PROJECT_DIR:-}" ]; then
     SOURCE="claude"
     SESSION_ID="${CLAUDE_SESSION_ID:-}"
 elif [ -n "${CODEX_SESSION_ID:-}${CODEX_HOME:-}" ]; then
@@ -43,6 +50,15 @@ if [ -t 0 ]; then
 else
     PAYLOAD="$(cat)"
     [ -z "$PAYLOAD" ] && PAYLOAD="{}"
+fi
+
+# If we still have no session id (Codex, and any hook that puts identity on
+# stdin rather than env), pull it from the payload. Stable session_id is
+# essential: without it the app keys sessions by source+pid, and pid is the
+# transient hook shell → every event would look like a new session.
+if [ -z "$SESSION_ID" ] && command -v jq >/dev/null 2>&1; then
+    _sid="$(printf '%s' "$PAYLOAD" | jq -r '.session_id // empty' 2>/dev/null || true)"
+    [ -n "$_sid" ] && SESSION_ID="$_sid"
 fi
 
 TS=$(date +%s)

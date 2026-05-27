@@ -22,10 +22,29 @@ let tabs = [
 
 struct TabSelectionView: View {
     @ObservedObject var coordinator = BoringViewCoordinator.shared
+    @ObservedObject var agentManager = AgentMonitorManager.shared
     @Namespace var animation
+
+    /// Home + Shelf always; the Claude / Codex tabs appear only while that
+    /// agent has live sessions, so the split reads at a glance and neither tab
+    /// clutters the bar when unused.
+    private var visibleTabs: [TabModel] {
+        var t: [TabModel] = [
+            TabModel(label: "Home", icon: "house.fill", view: .home),
+            TabModel(label: "Shelf", icon: "tray.fill", view: .shelf),
+        ]
+        if agentManager.hasSessions(source: .claude) {
+            t.append(TabModel(label: "Claude", icon: "terminal.fill", view: .agents))
+        }
+        if agentManager.hasSessions(source: .codex) {
+            t.append(TabModel(label: "Codex", icon: "chevron.left.forwardslash.chevron.right", view: .codex))
+        }
+        return t
+    }
+
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(tabs) { tab in
+            ForEach(visibleTabs) { tab in
                     TabButton(label: tab.label, icon: tab.icon, selected: coordinator.currentView == tab.view) {
                         withAnimation(.smooth) {
                             coordinator.currentView = tab.view
