@@ -22,6 +22,11 @@ final class AgentMonitorManager: ObservableObject {
   /// All tracked sessions keyed by stable session ID.
   @Published private(set) var sessions: [String: Session] = [:]
 
+  /// True while the transcript view is open — suppresses the notch's
+  /// scroll-up-to-close gesture so scrolling the conversation doesn't minimize
+  /// the notch (F3).
+  @Published var suppressNotchClose = false
+
   /// Last attention signal (set when a session enters waiting/done/failed).
   /// The notch UI observes this to fire a brief peek (Phase C).
   @Published private(set) var lastAlert: NotchAlert?

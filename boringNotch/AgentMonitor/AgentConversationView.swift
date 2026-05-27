@@ -14,8 +14,8 @@ struct AgentConversationView: View {
   let session: Session
   let onBack: () -> Void
 
-  @State private var messages: [TranscriptMessage] = []
-  @State private var loading = true
+  @StateObject private var watcher = TranscriptWatcher()
+  private static let bottomID = "transcript-bottom"
 
   var body: some View {
     VStack(spacing: 0) {
@@ -38,30 +38,46 @@ struct AgentConversationView: View {
 
       Divider().background(Color.white.opacity(0.1))
 
-      if loading {
+      if watcher.loading {
         Spacer()
         ProgressView().controlSize(.small)
         Spacer()
-      } else if messages.isEmpty {
+      } else if watcher.messages.isEmpty {
         Spacer()
         Text("No conversation yet")
           .font(.callout)
           .foregroundStyle(.secondary)
         Spacer()
       } else {
-        ScrollView {
-          VStack(alignment: .leading, spacing: 10) {
-            ForEach(messages) { message in
-              messageRow(message)
+        ScrollViewReader { proxy in
+          ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+              ForEach(watcher.messages) { message in
+                messageRow(message)
+              }
+              Color.clear.frame(height: 1).id(Self.bottomID)
+            }
+            .padding(10)
+          }
+          .scrollIndicators(.never)
+          .onAppear { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+          .onChange(of: watcher.messages.count) {
+            withAnimation(.easeOut(duration: 0.2)) {
+              proxy.scrollTo(Self.bottomID, anchor: .bottom)
             }
           }
-          .padding(10)
         }
-        .scrollIndicators(.never)
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .onAppear(perform: load)
+    .onAppear {
+      watcher.start(path: session.transcriptPath)
+      AgentMonitorManager.shared.suppressNotchClose = true
+    }
+    .onDisappear {
+      watcher.stop()
+      AgentMonitorManager.shared.suppressNotchClose = false
+    }
   }
 
   @ViewBuilder
@@ -94,16 +110,61 @@ struct AgentConversationView: View {
     }
   }
 
-  private func load() {
-    guard let path = session.transcriptPath else {
+}
+
+/// Watches a session's JSONL and re-parses the conversation when it grows, so
+/// the open transcript updates live (F3). Debounced ~250ms; failure-tolerant.
+@MainActor
+final class TranscriptWatcher: ObservableObject {
+  @Published private(set) var messages: [TranscriptMessage] = []
+  @Published private(set) var loading = true
+
+  private var path: String?
+  private var source: DispatchSourceFileSystemObject?
+  private var reloadTask: Task<Void, Never>?
+
+  func start(path: String?) {
+    guard let path else {
       loading = false
       return
     }
-    Task.detached(priority: .userInitiated) {
+    self.path = path
+    reload()
+    let fd = open(path, O_EVTONLY)
+    guard fd >= 0 else { return }
+    let src = DispatchSource.makeFileSystemObjectSource(
+      fileDescriptor: fd, eventMask: [.write, .extend], queue: .global())
+    src.setEventHandler { [weak self] in
+      Task { @MainActor in self?.scheduleReload() }
+    }
+    src.setCancelHandler { close(fd) }
+    source = src
+    src.resume()
+  }
+
+  func stop() {
+    reloadTask?.cancel()
+    reloadTask = nil
+    source?.cancel()  // cancel handler closes the fd
+    source = nil
+  }
+
+  private func scheduleReload() {
+    reloadTask?.cancel()
+    reloadTask = Task { @MainActor [weak self] in
+      try? await Task.sleep(nanoseconds: 250_000_000)
+      guard !Task.isCancelled else { return }
+      self?.reload()
+    }
+  }
+
+  private func reload() {
+    guard let path else { return }
+    Task.detached(priority: .utility) { [weak self] in
       let parsed = AgentTranscript.conversation(path: path)
       await MainActor.run {
-        messages = parsed
-        loading = false
+        self?.messages = parsed
+        self?.loading = false
       }
     }
   }

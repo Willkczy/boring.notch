@@ -689,6 +689,9 @@ struct ContentView: View {
     }
 
     private func handleUpGesture(translation: CGFloat, phase: NSEvent.Phase) {
+        // Don't let scroll-up close the notch while the agent transcript is open
+        // — that scroll is for the conversation, not a close gesture.
+        if AgentMonitorManager.shared.suppressNotchClose { return }
         guard vm.notchState == .open && !vm.isHoveringCalendar else { return }
 
         withAnimation(animationSpring) {
