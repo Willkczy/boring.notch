@@ -48,6 +48,10 @@ fi
 TS=$(date +%s)
 PID="${PPID:-0}"
 CWD="${PWD:-/}"
+# tmux pane tty (e.g. /dev/ttys003), set below only when inside tmux. The app
+# maps it to the tmux pane for send-keys (chat input). Empty for non-tmux →
+# chat input stays read-only.
+TTY=""
 
 # Resolve a STABLE pid for tap-to-focus. $PPID is the transient hook shell —
 # gone by the time the user taps the notch row. Walk the process tree up to the
@@ -78,6 +82,9 @@ if [ -n "${TMUX:-}" ] && command -v tmux >/dev/null 2>&1; then
         _gui=$(find_gui_ancestor "$_cpid")
         [ -n "$_gui" ] && [ "$_gui" -gt 1 ] && HOST_PID="$_gui"
     fi
+    # Pane tty of the pane this hook fired in — the app matches it against
+    # `tmux list-panes` to resolve the send-keys target for chat input.
+    TTY=$(tmux display-message -p '#{pane_tty}' 2>/dev/null)
 fi
 
 [ -z "$HOST_PID" ] && HOST_PID=0
@@ -92,13 +99,15 @@ if command -v jq >/dev/null 2>&1; then
         --argjson pid "$PID" \
         --argjson host_pid "$HOST_PID" \
         --arg cwd "$CWD" \
+        --arg tty "$TTY" \
         --argjson ts "$TS" \
         --argjson payload "$PAYLOAD" \
-        '{event:$event, source:$source, session_id:$session_id, pid:$pid, host_pid:$host_pid, cwd:$cwd, ts:$ts, payload:$payload}')
+        '{event:$event, source:$source, session_id:$session_id, pid:$pid, host_pid:$host_pid, cwd:$cwd, tty:$tty, ts:$ts, payload:$payload}')
 else
     # Crude but workable fallback. jq is strongly recommended.
     CWD_ESC=${CWD//\"/\\\"}
-    ENVELOPE="{\"event\":\"$EVENT\",\"source\":\"$SOURCE\",\"session_id\":\"$SESSION_ID\",\"pid\":$PID,\"host_pid\":$HOST_PID,\"cwd\":\"$CWD_ESC\",\"ts\":$TS,\"payload\":$PAYLOAD}"
+    TTY_ESC=${TTY//\"/\\\"}
+    ENVELOPE="{\"event\":\"$EVENT\",\"source\":\"$SOURCE\",\"session_id\":\"$SESSION_ID\",\"pid\":$PID,\"host_pid\":$HOST_PID,\"cwd\":\"$CWD_ESC\",\"tty\":\"$TTY_ESC\",\"ts\":$TS,\"payload\":$PAYLOAD}"
 fi
 
 if [ "$EVENT" = "permission_request" ]; then

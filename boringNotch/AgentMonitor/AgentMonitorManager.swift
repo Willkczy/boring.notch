@@ -159,6 +159,7 @@ final class AgentMonitorManager: ObservableObject {
         source: event.source,
         pid: event.pid,
         hostPid: event.hostPid,
+        tty: Self.normalizedTTY(event.tty),
         cwd: event.cwd,
         status: .working,
         lastTool: nil,
@@ -426,6 +427,8 @@ final class AgentMonitorManager: ObservableObject {
       // Keep the host pid fresh — e.g. tmux re-attached to a different terminal,
       // or a bridge upgrade now resolves it. Callers write the result back.
       if let hp = event.hostPid, hp > 1 { existing.hostPid = hp }
+      // Keep the tmux pane tty fresh too (re-attach can change it).
+      if let tty = Self.normalizedTTY(event.tty) { existing.tty = tty }
       return existing
     }
     logger.debug(
@@ -435,11 +438,18 @@ final class AgentMonitorManager: ObservableObject {
       source: event.source,
       pid: event.pid,
       hostPid: event.hostPid,
+      tty: Self.normalizedTTY(event.tty),
       cwd: event.cwd,
       status: .working,
       lastTool: nil,
       lastActivity: .init(),
       startedAt: .init()
     )
+  }
+
+  /// Treat an empty bridge `tty` (non-tmux sessions send "") as absent.
+  private static func normalizedTTY(_ tty: String?) -> String? {
+    guard let tty, !tty.isEmpty else { return nil }
+    return tty
   }
 }

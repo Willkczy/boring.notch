@@ -4,7 +4,7 @@
 //
 //  Open-notch "Agents" tab. The session list is the vibe-notch port
 //  (`ClaudeInstancesView`, driven by `AgentSessionMonitor`); tapping a row's
-//  chat icon opens its transcript (`AgentConversationView`), and the focus/
+//  chat icon opens its transcript (the ported `ChatView`), and the focus/
 //  terminal action brings the session's host app forward via its host PID.
 //  The notch shape + background are owned by ContentView.
 //
@@ -25,8 +25,18 @@ struct AgentsView: View {
 
   var body: some View {
     Group {
-      if let id = expandedSessionId, let session = manager.sessions[id] {
-        AgentConversationView(session: session, onBack: { expandedSessionId = nil })
+      if let id = expandedSessionId,
+        let state = sessionMonitor.instances.first(where: { $0.sessionId == id })
+      {
+        // Vibe-notch chat/transcript view (ported). History is parsed from the
+        // session's JSONL by ChatHistoryManager + watched live.
+        ChatView(
+          sessionId: id,
+          initialSession: state,
+          sessionMonitor: sessionMonitor,
+          onBack: { expandedSessionId = nil },
+          onFocus: { focusSession(state) }
+        )
       } else {
         ClaudeInstancesView(
           sessionMonitor: sessionMonitor,
@@ -37,9 +47,18 @@ struct AgentsView: View {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .onAppear { onExpandChange(expandedSessionId != nil) }
-    .onChange(of: expandedSessionId) { onExpandChange(expandedSessionId != nil) }
-    .onDisappear { onExpandChange(false) }
+    .onAppear { updateExpansion(expandedSessionId != nil) }
+    .onChange(of: expandedSessionId) { updateExpansion(expandedSessionId != nil) }
+    .onDisappear { updateExpansion(false) }
+  }
+
+  /// Reflect transcript open/closed state: grow the notch (F4b) AND suppress the
+  /// scroll-up-to-close gesture so scrolling the conversation doesn't minimize
+  /// the notch (the gesture is gated on `AgentMonitorManager.suppressNotchClose`
+  /// in ContentView). The deleted AgentConversationView used to own this flag.
+  private func updateExpansion(_ open: Bool) {
+    onExpandChange(open)
+    manager.suppressNotchClose = open
   }
 
   /// Resolve the live host/event pid for a vibe SessionState and bring it forward.

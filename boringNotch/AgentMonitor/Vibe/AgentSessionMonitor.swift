@@ -92,8 +92,10 @@ final class AgentSessionMonitor: ObservableObject {
                     cwd: session.cwd,
                     projectName: session.cwdBasename,
                     pid: session.pid,
-                    tty: nil,
-                    isInTmux: false,
+                    tty: session.tty,
+                    // A non-empty tmux pane tty (from the bridge) is our "in tmux"
+                    // signal — it's what enables chat-input send-keys.
+                    isInTmux: session.tty != nil,
                     phase: Self.phase(for: session.status, prompt: prompt),
                     conversationInfo: info,
                     lastActivity: session.lastActivity,

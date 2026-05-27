@@ -272,16 +272,11 @@ struct InstanceRow: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
             } else {
                 HStack(spacing: 8) {
-                    // Chat icon - always show
+                    // Chat icon - always show. (Focus is single-tap on the row;
+                    // the old vibe "eye" button was redundant with that, so it's
+                    // removed.)
                     IconButton(icon: "bubble.left") {
                         onChat()
-                    }
-
-                    // Focus icon (when the host app/terminal is resolvable)
-                    if canFocus {
-                        IconButton(icon: "eye") {
-                            onFocus()
-                        }
                     }
 
                     // Archive button - only for idle or completed sessions
@@ -298,8 +293,12 @@ struct InstanceRow: View {
         .padding(.trailing, 14)
         .padding(.vertical, 10)
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            onChat()
+        // Single-tap the row → focus the session's terminal/app (boringNotch's
+        // tap-to-focus behavior). Chat opens via the 💬 icon; the buttons
+        // (chat/eye/allow/deny/archive) consume their own taps so they win over
+        // this row gesture.
+        .onTapGesture {
+            onFocus()
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isWaitingForApproval)
         .background(

@@ -494,6 +494,12 @@ actor ConversationParser {
 
     /// Build session file path
     private static func sessionFilePath(sessionId: String, cwd: String) -> String {
+        transcriptFilePath(sessionId: sessionId, cwd: cwd)
+    }
+
+    /// Public path-derivation (boringNotch addition) so the chat-history file
+    /// watcher can resolve the transcript without going through the actor.
+    nonisolated static func transcriptFilePath(sessionId: String, cwd: String) -> String {
         let projectDir = cwd.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ".", with: "-")
         return ClaudePaths.projectsDir.path + "/" + projectDir + "/" + sessionId + ".jsonl"
     }

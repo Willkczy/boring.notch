@@ -88,6 +88,10 @@ struct Session: Identifiable, Sendable {
   /// Path to the session's Claude Code JSONL transcript (from the hook payload's
   /// `transcript_path`). Read directly for the title + conversation view (F).
   var transcriptPath: String? = nil
+  /// tmux pane tty (e.g. `/dev/ttys003`) when the session runs inside tmux, from
+  /// the hook envelope. Enables chat-input send-keys to the pane (G5). nil/empty
+  /// for non-tmux sessions → chat stays read-only.
+  var tty: String? = nil
   /// Latest user prompt, parsed from the transcript — shown as the row title.
   var title: String? = nil
   var cwd: String

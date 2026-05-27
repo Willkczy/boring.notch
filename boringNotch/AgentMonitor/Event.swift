@@ -106,6 +106,10 @@ struct Event: Codable, Sendable {
   /// Optional: absent from older bridges → falls back to `pid`.
   let hostPid: Int?
   let cwd: String
+  /// tmux pane tty (e.g. `/dev/ttys003`) when the session runs inside tmux,
+  /// else nil/empty. Used to map the session to its tmux pane for `send-keys`
+  /// (chat input). Optional: absent from older bridges / non-tmux sessions.
+  let tty: String?
   let ts: Int?
   let payload: JSONValue
 
@@ -116,6 +120,7 @@ struct Event: Codable, Sendable {
     case pid
     case hostPid = "host_pid"
     case cwd
+    case tty
     case ts
     case payload
   }
