@@ -16,6 +16,9 @@ import SwiftUI
 
 struct AgentsView: View {
   @ObservedObject var manager = AgentMonitorManager.shared
+  /// Called when the transcript opens (true) / closes (false) so the notch can
+  /// grow/restore its window (F4b).
+  var onExpandChange: (Bool) -> Void = { _ in }
   /// When set (and the session still exists), show its transcript instead of
   /// the list (F2).
   @State private var expandedSessionId: String?
@@ -57,6 +60,9 @@ struct AgentsView: View {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .onAppear { onExpandChange(expandedSessionId != nil) }
+    .onChange(of: expandedSessionId) { onExpandChange(expandedSessionId != nil) }
+    .onDisappear { onExpandChange(false) }
   }
 }
 

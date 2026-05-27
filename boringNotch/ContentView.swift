@@ -252,7 +252,13 @@ struct ContentView: View {
             }
         }
         .padding(.bottom, 8)
-        .frame(maxWidth: windowSize.width, maxHeight: windowSize.height, alignment: .top)
+        .frame(
+            maxWidth: windowSize.width,
+            maxHeight: vm.agentExpandedHeight.map { $0 + shadowPadding } ?? windowSize.height,
+            alignment: .top
+        )
+        // F4b: vibe-notch-style spring for the expand/collapse morph.
+        .animation(.spring(response: 0.42, dampingFraction: 0.8), value: vm.agentExpandedHeight)
         .ignoresSafeArea(.all)
         .compositingGroup()
         .scaleEffect(
@@ -419,7 +425,9 @@ struct ContentView: View {
                     case .shelf:
                         ShelfView()
                     case .agents:
-                        AgentsView()
+                        AgentsView(onExpandChange: { expanded in
+                            vm.setAgentExpanded(expanded ? 420 : nil)
+                        })
                     }
                 }
                 .transition(

@@ -70,6 +70,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var windows: [String: NSWindow] = [:] // UUID -> NSWindow
     var viewModels: [String: BoringViewModel] = [:] // UUID -> BoringViewModel
     var window: NSWindow?
+    /// F4b: observes vm.agentExpandedHeight to resize the notch window.
+    private var agentNotchResizeCancellable: AnyCancellable?
     let vm: BoringViewModel = .init()
     @ObservedObject var coordinator = BoringViewCoordinator.shared
     var quickShareService = QuickShareService.shared
@@ -311,10 +313,49 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.alphaValue = 1
     }
 
+    /// F4b: resize + reposition the notch window for the agent transcript.
+    /// The window only needs to *contain* the content; the visible morph is the
+    /// SwiftUI content spring. So resize the (transparent) window INSTANTLY —
+    /// grow immediately so the content has room to spring into; on collapse,
+    /// delay the shrink until the content spring has settled so it isn't
+    /// clipped. Top-pinned (grows downward).
+    @MainActor
+    private func resizeNotchWindow(expandedHeight: CGFloat?) {
+        guard let window = self.window,
+            let screen = window.screen ?? NSScreen.main
+        else { return }
+        let height = (expandedHeight ?? openNotchSize.height) + shadowPadding
+        let screenFrame = screen.frame
+        let frame = NSRect(
+            x: screenFrame.origin.x + screenFrame.width / 2 - windowSize.width / 2,
+            y: screenFrame.origin.y + screenFrame.height - height,
+            width: windowSize.width,
+            height: height)
+
+        if height >= window.frame.height {
+            window.setFrame(frame, display: true, animate: false)  // grow now
+        } else {
+            // Shrink after the content spring settles (≈0.45s), and only if we
+            // haven't expanded again in the meantime.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
+                guard let self, self.vm.agentExpandedHeight == expandedHeight else { return }
+                window.setFrame(frame, display: true, animate: false)
+            }
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
 
         // Start the loopback listener for Claude Code / Codex agent events.
         AgentMonitorManager.shared.start()
+
+        // F4b: grow/restore the notch window when the agent transcript expands.
+        agentNotchResizeCancellable = vm.$agentExpandedHeight
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] height in
+                self?.resizeNotchWindow(expandedHeight: height)
+            }
 
         NotificationCenter.default.addObserver(
             self,

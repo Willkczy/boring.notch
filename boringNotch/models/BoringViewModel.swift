@@ -35,7 +35,12 @@ class BoringViewModel: NSObject, ObservableObject {
 
     @Published var notchSize: CGSize = getClosedNotchSize()
     @Published var closedNotchSize: CGSize = getClosedNotchSize()
-    
+    /// F4b: when non-nil, the open notch (and its window) grow to this height
+    /// for the agent transcript view. nil = normal `openNotchSize`. The app
+    /// observes this to resize the window; ContentView uses it for the content
+    /// frame. Always reset to nil on close.
+    @Published var agentExpandedHeight: CGFloat?
+
     let webcamManager = WebcamManager.shared
     @Published var isCameraExpanded: Bool = false
     @Published var isRequestingAuthorization: Bool = false
@@ -207,6 +212,16 @@ class BoringViewModel: NSObject, ObservableObject {
         return true
     }
 
+    /// Grow (or restore) the open notch for the agent transcript view (F4b).
+    func setAgentExpanded(_ height: CGFloat?) {
+        agentExpandedHeight = height
+        if notchState == .open {
+            notchSize = CGSize(
+                width: openNotchSize.width,
+                height: height ?? openNotchSize.height)
+        }
+    }
+
     func close() {
         // Do not close while a share picker or sharing service is active
         if SharingStateManager.shared.preventNotchClose {
@@ -215,6 +230,7 @@ class BoringViewModel: NSObject, ObservableObject {
         self.notchSize = getClosedNotchSize(screenUUID: self.screenUUID)
         self.closedNotchSize = self.notchSize
         self.notchState = .closed
+        self.agentExpandedHeight = nil  // F4b: never stay expanded once closed
         self.isBatteryPopoverActive = false
         if self.coordinator.shouldShowSneakPeek(on: self.screenUUID) {
             self.coordinator.toggleSneakPeek(status: false, type: .music, targetScreenUUID: self.screenUUID)
