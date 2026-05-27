@@ -83,6 +83,10 @@ final class AgentMonitorManager: ObservableObject {
   /// True when any session is being tracked — drives Agents-tab visibility (Phase B).
   var hasActiveSessions: Bool { !sessions.isEmpty }
 
+  /// Number of distinct statuses present across sessions = number of dots the
+  /// collapsed glance renders. Used to size the notch chin so none clip.
+  var activeStatusGroupCount: Int { Set(sessions.values.map(\.status)).count }
+
   // MARK: - Lifecycle
 
   /// Start the loopback listener. Idempotent. No-op when disabled in settings.

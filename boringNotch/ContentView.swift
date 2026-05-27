@@ -98,18 +98,19 @@ struct ContentView: View {
             && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed
         {
             chinWidth += (2 * max(0, displayClosedNotchHeight - 12) + 20 + 2 * liveActivityEdgeMargin + 2)
-            // Extra room so the agent dots fit to the right of the spectrum.
+            // Room for the dots on the right PLUS an equal left balance spacer
+            // (keeps the music centered on the notch — see MusicLiveActivity).
             if agentManager.hasActiveSessions && Defaults[.agentNotchIndicator] {
-                chinWidth += 56
+                chinWidth += 2 * (8 + CGFloat(agentManager.activeStatusGroupCount) * 22)
             }
         } else if !coordinator.expandingView.show && vm.notchState == .closed
             && (!musicManager.isPlaying && musicManager.isPlayerIdle)
             && agentManager.hasActiveSessions && Defaults[.agentNotchIndicator]
             && !vm.hideOnClosed
         {
-            // Widen the chin so the agent status dots have a visible spot beside
-            // the notch (same region the music album art / face use).
-            chinWidth += (2 * max(0, displayClosedNotchHeight - 12) + 20)
+            // Widen the chin to fit the notch-cover (+20) plus one ~22pt slot per
+            // status dot, so none clip off the leading-aligned content.
+            chinWidth += (32 + CGFloat(agentManager.activeStatusGroupCount) * 22)
         } else if !coordinator.expandingView.show && vm.notchState == .closed
             && (!musicManager.isPlaying && musicManager.isPlayerIdle) && Defaults[.showNotHumanFace]
             && !vm.hideOnClosed
@@ -466,6 +467,16 @@ struct ContentView: View {
     @ViewBuilder
     func MusicLiveActivity() -> some View {
         HStack(spacing: 0) {
+            let agentDots = agentManager.hasActiveSessions && Defaults[.agentNotchIndicator]
+            let agentDotsWidth: CGFloat =
+                agentDots ? CGFloat(agentManager.activeStatusGroupCount) * 22 + 8 : 0
+            // Left balance spacer: keeps the album art + spectrum centered on the
+            // physical notch when the agent dots are appended on the right.
+            // Without it the centered content shifts left and the spectrum slides
+            // under the notch on built-in notched displays (hidden by hardware).
+            if agentDots {
+                Color.clear.frame(width: agentDotsWidth)
+            }
             // Closed-mode album art: scale padding and corner radius according to cornerRadiusScaleFactor
             let baseArtSize = displayClosedNotchHeight - 12
             let scaledArtSize: CGFloat = {
@@ -564,12 +575,12 @@ struct ContentView: View {
                 alignment: .center
             )
 
-            // Agent status dots share the music chin so the glance persists
-            // while music plays (the chin is widened for them in computedChinWidth).
-            if agentManager.hasActiveSessions && Defaults[.agentNotchIndicator] {
+            // Agent status dots share the music chin so the glance persists while
+            // music plays. Fixed-width slot = the left balance spacer above, so
+            // the music content stays centered on the notch.
+            if agentDots {
                 AgentNotchIndicator()
-                    .padding(.leading, 6)
-                    .padding(.trailing, 2)
+                    .frame(width: agentDotsWidth, alignment: .leading)
             }
         }
         .frame(
