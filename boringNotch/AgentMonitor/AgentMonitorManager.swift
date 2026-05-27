@@ -259,6 +259,33 @@ final class AgentMonitorManager: ObservableObject {
     case .unknown:
       logger.debug("unknown event type ignored for session: \(key, privacy: .public)")
     }
+
+    // F (sandbox-off): read the session's JSONL for a row title. Keep the path
+    // fresh; (re)parse the title on a new prompt or the first time we see it.
+    if let tp = Self.transcriptPath(from: event.payload), var s = sessions[key] {
+      let needTitle = s.title == nil || event.event == .userPrompt
+      s.transcriptPath = tp
+      sessions[key] = s
+      if needTitle { refreshTitle(for: key, path: tp) }
+    }
+  }
+
+  /// Parse the latest-prompt title off the main actor, then apply it.
+  private func refreshTitle(for key: String, path: String) {
+    Task.detached(priority: .utility) { [weak self] in
+      guard let title = AgentTranscript.latestPrompt(path: path) else { return }
+      await MainActor.run {
+        guard let self, var s = self.sessions[key], s.title != title else { return }
+        s.title = title
+        self.sessions[key] = s
+      }
+    }
+  }
+
+  private static func transcriptPath(from payload: JSONValue) -> String? {
+    guard case .object(let obj) = payload, case .string(let p)? = obj["transcript_path"]
+    else { return nil }
+    return p
   }
 
   // MARK: - Interactive permission (E2)

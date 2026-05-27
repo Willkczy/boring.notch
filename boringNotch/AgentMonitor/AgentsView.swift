@@ -69,21 +69,26 @@ private struct AgentSessionRow: View {
           .frame(width: 8, height: 8)
 
         VStack(alignment: .leading, spacing: 2) {
+          // Title = latest user prompt (parsed from the JSONL); falls back to
+          // the working-dir name until the transcript is read.
+          Text(session.title ?? session.cwdBasename)
+            .font(.caption)
+            .fontWeight(.medium)
+            .foregroundStyle(.white)
+            .lineLimit(1)
           HStack(spacing: 4) {
             Text(session.source.rawValue)
-              .font(.caption2)
               .foregroundStyle(.secondary)
             Text(session.cwdBasename)
-              .font(.caption)
-              .fontWeight(.medium)
-              .foregroundStyle(.white)
-              .lineLimit(1)
-          }
-          if let tool = session.lastTool {
-            Text(tool)
-              .font(.caption2)
               .foregroundStyle(.tertiary)
+              .lineLimit(1)
+            if let tool = session.lastTool {
+              Text("· \(tool)")
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+            }
           }
+          .font(.caption2)
         }
 
         Spacer()

@@ -85,6 +85,11 @@ struct Session: Identifiable, Sendable {
   /// Stable pid of the GUI app hosting this session (set from the event's
   /// `host_pid`), used to focus the terminal / Claude window on row tap.
   var hostPid: Int? = nil
+  /// Path to the session's Claude Code JSONL transcript (from the hook payload's
+  /// `transcript_path`). Read directly for the title + conversation view (F).
+  var transcriptPath: String? = nil
+  /// Latest user prompt, parsed from the transcript — shown as the row title.
+  var title: String? = nil
   var cwd: String
   var status: SessionStatus
   /// Name of the last tool invoked, if any.
