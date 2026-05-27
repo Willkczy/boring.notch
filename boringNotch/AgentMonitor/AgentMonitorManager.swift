@@ -293,6 +293,15 @@ final class AgentMonitorManager: ObservableObject {
     return p
   }
 
+  /// Remove a session from the table (user "archive"/dismiss from the UI).
+  /// Resolves any pending permission first so a held bridge connection unblocks.
+  func endSession(id: String) {
+    clearPendingPermissions(for: id)
+    if sessions.removeValue(forKey: id) != nil {
+      logger.debug("session archived by user: \(id, privacy: .public)")
+    }
+  }
+
   // MARK: - Interactive permission (E2)
 
   /// Decide an incoming `permission_request`. Called by EventReceiver, which

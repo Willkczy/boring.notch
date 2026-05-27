@@ -2,12 +2,11 @@
 //  AgentsView.swift
 //  boringNotch — Agent Monitor
 //
-//  Open-notch "Agents" tab: a scrollable list of live Claude Code / Codex
-//  sessions. Each row shows source, working-dir basename, last tool, status
-//  and elapsed time. Tapping a row focuses that session's terminal via its
-//  parent PID. Ported from the standalone app's ExpandedView, restyled for
-//  boring.notch's dark open-notch panel (the notch shape + background are
-//  owned by ContentView).
+//  Open-notch "Agents" tab. The session list is the vibe-notch port
+//  (`ClaudeInstancesView`, driven by `AgentSessionMonitor`); tapping a row's
+//  chat icon opens its transcript (`AgentConversationView`), and the focus/
+//  terminal action brings the session's host app forward via its host PID.
+//  The notch shape + background are owned by ContentView.
 //
 
 import AppKit
@@ -16,6 +15,7 @@ import SwiftUI
 
 struct AgentsView: View {
   @ObservedObject var manager = AgentMonitorManager.shared
+  @ObservedObject var sessionMonitor = AgentSessionMonitor.shared
   /// Called when the transcript opens (true) / closes (false) so the notch can
   /// grow/restore its window (F4b).
   var onExpandChange: (Bool) -> Void = { _ in }
@@ -23,40 +23,17 @@ struct AgentsView: View {
   /// the list (F2).
   @State private var expandedSessionId: String?
 
-  private var sortedSessions: [Session] {
-    manager.sessions.values.sorted { $0.startedAt < $1.startedAt }
-  }
-
   var body: some View {
     Group {
       if let id = expandedSessionId, let session = manager.sessions[id] {
         AgentConversationView(session: session, onBack: { expandedSessionId = nil })
-      } else if sortedSessions.isEmpty {
-        VStack(spacing: 6) {
-          Image(systemName: "terminal")
-            .font(.title2)
-          Text("No active agent sessions")
-            .font(.callout)
-        }
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
-        ScrollView {
-          VStack(spacing: 4) {
-            ForEach(sortedSessions) { session in
-              AgentSessionRow(
-                session: session,
-                prompt: manager.pendingPrompt(for: session.id),
-                onExpand: { expandedSessionId = session.id }
-              )
-              .contentShape(Rectangle())
-              .onTapGesture { focusTerminal(hostPid: session.hostPid, fallbackPid: session.pid) }
-            }
-          }
-          .padding(.horizontal, 8)
-          .padding(.vertical, 4)
-        }
-        .scrollIndicators(.never)
+        ClaudeInstancesView(
+          sessionMonitor: sessionMonitor,
+          onOpenChat: { expandedSessionId = $0.sessionId },
+          onFocus: { focusSession($0) },
+          canFocus: { canFocus($0) }
+        )
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -64,121 +41,18 @@ struct AgentsView: View {
     .onChange(of: expandedSessionId) { onExpandChange(expandedSessionId != nil) }
     .onDisappear { onExpandChange(false) }
   }
-}
 
-// MARK: - Session row
-
-private struct AgentSessionRow: View {
-  let session: Session
-  /// Live pending permission for this session (nil when none) — drives the
-  /// Allow/Deny bar straight from the manager's source of truth.
-  let prompt: AgentMonitorManager.PendingPrompt?
-  /// Open this session's transcript view.
-  let onExpand: () -> Void
-  @State private var elapsed: TimeInterval = 0
-  private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      HStack(spacing: 8) {
-        Circle()
-          .fill(session.status.color)
-          .frame(width: 8, height: 8)
-
-        VStack(alignment: .leading, spacing: 2) {
-          // Title = latest user prompt (parsed from the JSONL); falls back to
-          // the working-dir name until the transcript is read.
-          Text(session.title ?? session.cwdBasename)
-            .font(.caption)
-            .fontWeight(.medium)
-            .foregroundStyle(.white)
-            .lineLimit(1)
-          HStack(spacing: 4) {
-            Text(session.source.rawValue)
-              .foregroundStyle(.secondary)
-            Text(session.cwdBasename)
-              .foregroundStyle(.tertiary)
-              .lineLimit(1)
-            if let tool = session.lastTool {
-              Text("· \(tool)")
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-            }
-          }
-          .font(.caption2)
-        }
-
-        Spacer()
-
-        Text(session.status.label)
-          .font(.caption2)
-          .foregroundStyle(session.status.color)
-        Text(formatElapsed(elapsed))
-          .font(.caption2.monospacedDigit())
-          .foregroundStyle(.secondary)
-        // Open the transcript view. Its own tap, so it doesn't trigger the
-        // row's focus-terminal gesture.
-        Button(action: onExpand) {
-          Image(systemName: "bubble.left.and.text.bubble.right")
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
-        }
-        .buttonStyle(.plain)
-      }
-
-      // E2: interactive Allow/Deny while this session is awaiting a permission.
-      // Driven by the live prompt, so it clears the instant the decision lands.
-      if let prompt {
-        decisionBar(prompt)
-      }
-    }
-    .padding(.vertical, 6)
-    .padding(.horizontal, 8)
-    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-    .onAppear { elapsed = -session.startedAt.timeIntervalSinceNow }
-    .onReceive(timer) { _ in elapsed = -session.startedAt.timeIntervalSinceNow }
+  /// Resolve the live host/event pid for a vibe SessionState and bring it forward.
+  private func focusSession(_ session: SessionState) {
+    let live = manager.sessions[session.sessionId]
+    focusTerminal(hostPid: live?.hostPid, fallbackPid: live?.pid ?? session.pid ?? 0)
   }
 
-  @ViewBuilder
-  private func decisionBar(_ prompt: AgentMonitorManager.PendingPrompt) -> some View {
-    VStack(alignment: .leading, spacing: 4) {
-      // Show exactly what is being authorized (security: no truncation of the
-      // decision-relevant input beyond a generous limit).
-      Text("Permission: \(prompt.tool ?? "tool")")
-        .font(.caption2.weight(.semibold))
-        .foregroundStyle(.orange)
-      if let input = prompt.inputSummary, !input.isEmpty {
-        Text(input)
-          .font(.caption2.monospaced())
-          .foregroundStyle(.white.opacity(0.85))
-          .lineLimit(3)
-          .textSelection(.enabled)
-      }
-      HStack(spacing: 6) {
-        Button("Allow") {
-          AgentMonitorManager.shared.resolvePermission(id: prompt.id, decision: .allow)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(.green)
-        .controlSize(.small)
-
-        Button("Deny") {
-          AgentMonitorManager.shared.resolvePermission(id: prompt.id, decision: .deny)
-        }
-        .buttonStyle(.bordered)
-        .tint(.red)
-        .controlSize(.small)
-      }
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(8)
-    .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
-  }
-
-  private func formatElapsed(_ s: TimeInterval) -> String {
-    let total = max(0, Int(s))
-    if total < 60 { return "\(total)s" }
-    return "\(total / 60)m\(total % 60)s"
+  /// Whether we have a focusable pid for this session.
+  private func canFocus(_ session: SessionState) -> Bool {
+    let live = manager.sessions[session.sessionId]
+    if let hp = live?.hostPid, hp > 1 { return true }
+    return (live?.pid ?? session.pid ?? 0) > 1
   }
 }
 
@@ -196,6 +70,7 @@ private func focusTerminal(hostPid: Int?, fallbackPid: Int) {
     return
   }
   guard
+    fallbackPid > 1,
     let ppid = parentPID(of: pid_t(fallbackPid)),
     let app = NSRunningApplication(processIdentifier: ppid)
   else { return }
