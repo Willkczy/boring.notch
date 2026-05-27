@@ -100,6 +100,11 @@ struct Event: Codable, Sendable {
   let source: EventSource
   let sessionId: String?
   let pid: Int
+  /// Stable pid of the GUI app hosting the session (terminal emulator or the
+  /// desktop Claude app), resolved by the bridge. Used for tap-to-focus —
+  /// unlike `pid` (the transient hook shell), this process outlives the hook.
+  /// Optional: absent from older bridges → falls back to `pid`.
+  let hostPid: Int?
   let cwd: String
   let ts: Int?
   let payload: JSONValue
@@ -109,6 +114,7 @@ struct Event: Codable, Sendable {
     case source
     case sessionId = "session_id"
     case pid
+    case hostPid = "host_pid"
     case cwd
     case ts
     case payload

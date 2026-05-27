@@ -49,6 +49,39 @@ TS=$(date +%s)
 PID="${PPID:-0}"
 CWD="${PWD:-/}"
 
+# Resolve a STABLE pid for tap-to-focus. $PPID is the transient hook shell —
+# gone by the time the user taps the notch row. Walk the process tree up to the
+# top-most ancestor whose parent is launchd (pid 1): the GUI app hosting the
+# session (Terminal / iTerm / Ghostty, or the desktop Claude app). Activating
+# that pid app-side brings the session's window forward.
+find_gui_ancestor() {
+    local pid="$1" ppid
+    while [ -n "$pid" ] && [ "$pid" -gt 1 ]; do
+        ppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+        [ -z "$ppid" ] && break
+        [ "$ppid" -eq 1 ] && break   # parent is launchd → pid is the top GUI app
+        pid="$ppid"
+    done
+    echo "${pid:-0}"
+}
+HOST_PID=$(find_gui_ancestor "${PPID:-0}")
+
+# tmux: the pane's process tree leads up to the (GUI-less) tmux server, not the
+# terminal showing it — so the walk above lands on tmux and focus fails. Ask
+# tmux which client (terminal) is attached to this pane's session and walk up
+# from the CLIENT pid instead, which reaches the real terminal app (Ghostty /
+# iTerm / …). A detached session has no client → leave HOST_PID as-is.
+if [ -n "${TMUX:-}" ] && command -v tmux >/dev/null 2>&1; then
+    _sess=$(tmux display-message -p '#{session_name}' 2>/dev/null)
+    _cpid=$(tmux list-clients ${_sess:+-t "$_sess"} -F '#{client_pid}' 2>/dev/null | head -1)
+    if [ -n "$_cpid" ]; then
+        _gui=$(find_gui_ancestor "$_cpid")
+        [ -n "$_gui" ] && [ "$_gui" -gt 1 ] && HOST_PID="$_gui"
+    fi
+fi
+
+[ -z "$HOST_PID" ] && HOST_PID=0
+
 # Build envelope. We use jq if available for safe escaping; otherwise
 # fall back to a minimal manual build that escapes the cwd's quotes.
 if command -v jq >/dev/null 2>&1; then
@@ -57,14 +90,15 @@ if command -v jq >/dev/null 2>&1; then
         --arg source "$SOURCE" \
         --arg session_id "$SESSION_ID" \
         --argjson pid "$PID" \
+        --argjson host_pid "$HOST_PID" \
         --arg cwd "$CWD" \
         --argjson ts "$TS" \
         --argjson payload "$PAYLOAD" \
-        '{event:$event, source:$source, session_id:$session_id, pid:$pid, cwd:$cwd, ts:$ts, payload:$payload}')
+        '{event:$event, source:$source, session_id:$session_id, pid:$pid, host_pid:$host_pid, cwd:$cwd, ts:$ts, payload:$payload}')
 else
     # Crude but workable fallback. jq is strongly recommended.
     CWD_ESC=${CWD//\"/\\\"}
-    ENVELOPE="{\"event\":\"$EVENT\",\"source\":\"$SOURCE\",\"session_id\":\"$SESSION_ID\",\"pid\":$PID,\"cwd\":\"$CWD_ESC\",\"ts\":$TS,\"payload\":$PAYLOAD}"
+    ENVELOPE="{\"event\":\"$EVENT\",\"source\":\"$SOURCE\",\"session_id\":\"$SESSION_ID\",\"pid\":$PID,\"host_pid\":$HOST_PID,\"cwd\":\"$CWD_ESC\",\"ts\":$TS,\"payload\":$PAYLOAD}"
 fi
 
 if [ "$EVENT" = "permission_request" ]; then

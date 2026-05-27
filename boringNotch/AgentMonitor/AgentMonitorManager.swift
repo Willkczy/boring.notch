@@ -153,6 +153,7 @@ final class AgentMonitorManager: ObservableObject {
         id: key,
         source: event.source,
         pid: event.pid,
+        hostPid: event.hostPid,
         cwd: event.cwd,
         status: .working,
         lastTool: nil,
@@ -380,13 +381,19 @@ final class AgentMonitorManager: ObservableObject {
   /// app restart) reappear on their next hook event, instead of being dropped
   /// until they happen to send another `session_start`.
   private func adoptedSession(key: String, event: Event) -> Session {
-    if let existing = sessions[key] { return existing }
+    if var existing = sessions[key] {
+      // Keep the host pid fresh — e.g. tmux re-attached to a different terminal,
+      // or a bridge upgrade now resolves it. Callers write the result back.
+      if let hp = event.hostPid, hp > 1 { existing.hostPid = hp }
+      return existing
+    }
     logger.debug(
       "session adopted from \(event.event.rawValue, privacy: .public): \(key, privacy: .public)")
     return Session(
       id: key,
       source: event.source,
       pid: event.pid,
+      hostPid: event.hostPid,
       cwd: event.cwd,
       status: .working,
       lastTool: nil,

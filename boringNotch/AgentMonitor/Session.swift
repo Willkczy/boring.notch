@@ -82,6 +82,9 @@ struct Session: Identifiable, Sendable {
   let id: String
   let source: EventSource
   let pid: Int
+  /// Stable pid of the GUI app hosting this session (set from the event's
+  /// `host_pid`), used to focus the terminal / Claude window on row tap.
+  var hostPid: Int? = nil
   var cwd: String
   var status: SessionStatus
   /// Name of the last tool invoked, if any.

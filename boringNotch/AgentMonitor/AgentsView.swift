@@ -38,7 +38,7 @@ struct AgentsView: View {
             ForEach(sortedSessions) { session in
               AgentSessionRow(session: session, prompt: manager.pendingPrompt(for: session.id))
                 .contentShape(Rectangle())
-                .onTapGesture { focusTerminal(pid: session.pid) }
+                .onTapGesture { focusTerminal(hostPid: session.hostPid, fallbackPid: session.pid) }
             }
           }
           .padding(.horizontal, 8)
@@ -154,11 +154,19 @@ private struct AgentSessionRow: View {
 
 // MARK: - Terminal focus
 
-/// Activate the terminal that launched `pid`. The agent process is a child of
-/// the terminal emulator; activating the parent brings that window forward.
-private func focusTerminal(pid: Int) {
+/// Bring the session's host app forward — the terminal emulator (Terminal /
+/// iTerm / Ghostty …) or the desktop Claude app. Prefers the bridge-resolved
+/// `hostPid` (a stable GUI-app pid that outlives the hook); falls back to
+/// walking one level up from the event pid for older bridges.
+private func focusTerminal(hostPid: Int?, fallbackPid: Int) {
+  if let hostPid, hostPid > 1,
+    let app = NSRunningApplication(processIdentifier: pid_t(hostPid))
+  {
+    app.activate(options: [.activateAllWindows])
+    return
+  }
   guard
-    let ppid = parentPID(of: pid_t(pid)),
+    let ppid = parentPID(of: pid_t(fallbackPid)),
     let app = NSRunningApplication(processIdentifier: ppid)
   else { return }
   app.activate(options: [.activateAllWindows])
