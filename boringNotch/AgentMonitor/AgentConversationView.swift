@@ -170,58 +170,135 @@ final class TranscriptWatcher: ObservableObject {
   }
 }
 
-/// Minimal markdown: inline styling via AttributedString, with fenced ```code```
-/// blocks pulled out and rendered as monospaced boxes (AttributedString does
-/// not handle block-level code).
+/// Block-level markdown renderer (F4): headings, bulleted/numbered lists,
+/// dividers, fenced code blocks, and paragraphs. Inline styling (bold, `code`)
+/// within each block via AttributedString. No external dependency.
 struct MarkdownText: View {
   let text: String
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      ForEach(Array(Self.segments(text).enumerated()), id: \.offset) { _, seg in
-        if seg.isCode {
-          Text(seg.content)
-            .font(.system(.caption2, design: .monospaced))
-            .foregroundStyle(.white.opacity(0.85))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(8)
-            .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
-            .textSelection(.enabled)
-        } else {
-          Text(Self.inlineMarkdown(seg.content))
-            .font(.caption2)
-            .foregroundStyle(.white.opacity(0.9))
-            .textSelection(.enabled)
-        }
+    VStack(alignment: .leading, spacing: 5) {
+      ForEach(Array(Self.parse(text).enumerated()), id: \.offset) { _, block in
+        blockView(block)
       }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  @ViewBuilder
+  private func blockView(_ block: Block) -> some View {
+    switch block {
+    case .heading(let level, let t):
+      Text(Self.inline(t))
+        .font(.system(size: level <= 1 ? 13 : (level == 2 ? 12 : 11), weight: .bold))
+        .foregroundStyle(.white)
+        .padding(.top, 2)
+    case .bullet(let t):
+      HStack(alignment: .top, spacing: 6) {
+        Text("•").foregroundStyle(.secondary)
+        Text(Self.inline(t)).foregroundStyle(.white.opacity(0.9))
+      }
+      .font(.caption2)
+    case .numbered(let n, let t):
+      HStack(alignment: .top, spacing: 6) {
+        Text("\(n).").foregroundStyle(.secondary).monospacedDigit()
+        Text(Self.inline(t)).foregroundStyle(.white.opacity(0.9))
+      }
+      .font(.caption2)
+    case .code(let c):
+      Text(c)
+        .font(.system(.caption2, design: .monospaced))
+        .foregroundStyle(.white.opacity(0.85))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
+        .textSelection(.enabled)
+    case .divider:
+      Divider().background(Color.white.opacity(0.15)).padding(.vertical, 2)
+    case .paragraph(let t):
+      Text(Self.inline(t))
+        .font(.caption2)
+        .foregroundStyle(.white.opacity(0.9))
+        .textSelection(.enabled)
     }
   }
 
-  private struct Segment { let content: String; let isCode: Bool }
-
-  /// Split on ``` fences into alternating prose / code segments.
-  private static func segments(_ text: String) -> [Segment] {
-    let parts = text.components(separatedBy: "```")
-    var result: [Segment] = []
-    for (i, part) in parts.enumerated() {
-      let isCode = i % 2 == 1  // odd indices are inside fences
-      var content = part
-      if isCode {
-        // Drop a leading language hint line (e.g. "swift\n…").
-        if let nl = content.firstIndex(of: "\n") {
-          let firstLine = content[content.startIndex..<nl]
-          if !firstLine.contains(" ") && firstLine.count < 16 {
-            content = String(content[content.index(after: nl)...])
-          }
-        }
-      }
-      let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-      if !trimmed.isEmpty { result.append(Segment(content: trimmed, isCode: isCode)) }
-    }
-    return result
+  private enum Block {
+    case heading(level: Int, text: String)
+    case bullet(text: String)
+    case numbered(num: String, text: String)
+    case code(String)
+    case divider
+    case paragraph(String)
   }
 
-  private static func inlineMarkdown(_ s: String) -> AttributedString {
+  /// Line-based block parser. Accumulates consecutive prose lines into one
+  /// paragraph; pulls fenced ``` blocks out verbatim.
+  private static func parse(_ text: String) -> [Block] {
+    var blocks: [Block] = []
+    var para: [String] = []
+    func flushPara() {
+      let joined = para.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+      if !joined.isEmpty { blocks.append(.paragraph(joined)) }
+      para.removeAll()
+    }
+
+    var lines = text.components(separatedBy: "\n")[...]
+    while let raw = lines.first {
+      lines = lines.dropFirst()
+      let line = String(raw)
+      let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+      if trimmed.hasPrefix("```") {  // code fence — consume to the closing fence
+        flushPara()
+        var code: [String] = []
+        while let next = lines.first, !next.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+          code.append(String(next))
+          lines = lines.dropFirst()
+        }
+        if lines.first != nil { lines = lines.dropFirst() }  // drop closing fence
+        let body = code.joined(separator: "\n").trimmingCharacters(in: .newlines)
+        if !body.isEmpty { blocks.append(.code(body)) }
+        continue
+      }
+      if trimmed.isEmpty { flushPara(); continue }
+      if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+        flushPara()
+        blocks.append(.divider)
+        continue
+      }
+      if let h = heading(trimmed) { flushPara(); blocks.append(h); continue }
+      if let b = listItem(trimmed) { flushPara(); blocks.append(b); continue }
+      para.append(trimmed)
+    }
+    flushPara()
+    return blocks
+  }
+
+  private static func heading(_ s: String) -> Block? {
+    guard s.hasPrefix("#") else { return nil }
+    let hashes = s.prefix { $0 == "#" }
+    let rest = s.dropFirst(hashes.count)
+    guard rest.first == " " else { return nil }
+    return .heading(level: hashes.count, text: rest.trimmingCharacters(in: .whitespaces))
+  }
+
+  private static func listItem(_ s: String) -> Block? {
+    if s.hasPrefix("- ") || s.hasPrefix("* ") {
+      return .bullet(text: String(s.dropFirst(2)))
+    }
+    // Numbered: "1. text"
+    if let dot = s.firstIndex(of: "."), s[s.startIndex..<dot].allSatisfy(\.isNumber),
+      s.startIndex != dot, s.index(after: dot) < s.endIndex, s[s.index(after: dot)] == " "
+    {
+      return .numbered(
+        num: String(s[s.startIndex..<dot]),
+        text: String(s[s.index(dot, offsetBy: 2)...]))
+    }
+    return nil
+  }
+
+  private static func inline(_ s: String) -> AttributedString {
     (try? AttributedString(
       markdown: s,
       options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
