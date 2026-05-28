@@ -95,6 +95,12 @@ struct Session: Identifiable, Sendable {
   /// Latest user prompt, parsed from the transcript — shown as the row title.
   var title: String? = nil
   var cwd: String
+  /// True when this session was discovered by polling the Codex sessions
+  /// directory (Codex Desktop, which doesn't fire hooks) rather than via a hook
+  /// event. The watcher owns these — hook-driven sessions always win on a key
+  /// clash, and these are observe-only (no pid/hostPid/tty → no focus, no
+  /// interactive permission, no tmux-send).
+  var fileDiscovered: Bool = false
   var status: SessionStatus
   /// Name of the last tool invoked, if any.
   var lastTool: String?

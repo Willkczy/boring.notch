@@ -119,12 +119,16 @@ final class AgentMonitorManager: ObservableObject {
       }
     }
     startMaintenanceTimer()
+    // Poll the Codex sessions directory for Codex Desktop sessions (which don't
+    // fire hooks). CLI codex still comes through the listener above.
+    CodexSessionWatcher.shared.start()
   }
 
   /// Stop the listener and release it.
   func stop() {
     maintenanceTimer?.invalidate()
     maintenanceTimer = nil
+    CodexSessionWatcher.shared.stop()
     let receiver = self.receiver
     Task { await receiver?.stop() }
     self.receiver = nil
@@ -298,6 +302,46 @@ final class AgentMonitorManager: ObservableObject {
     guard case .object(let obj) = payload, case .string(let p)? = obj["transcript_path"]
     else { return nil }
     return p
+  }
+
+  /// Merge in Codex Desktop sessions discovered by polling the sessions dir
+  /// (G7). The watcher owns these: hook-driven sessions always win on a key
+  /// clash, and file-discovered sessions no longer active are dropped. No alerts
+  /// are emitted (observe-only; avoids notification spam on bulk discovery).
+  func applyDiscoveredCodexSessions(_ discovered: [DiscoveredCodexSession]) {
+    let activeIds = Set(discovered.map(\.id))
+
+    // Drop file-discovered sessions that are no longer active.
+    for (key, s) in Array(sessions) where s.fileDiscovered && !activeIds.contains(key) {
+      sessions.removeValue(forKey: key)
+    }
+
+    for d in discovered {
+      if let existing = sessions[d.id] {
+        // A hook-driven session for this id wins — never overwrite it.
+        guard existing.fileDiscovered else { continue }
+        var s = existing
+        s.status = d.status
+        s.cwd = d.cwd
+        s.transcriptPath = d.transcriptPath
+        s.lastActivity = d.lastActivity
+        sessions[d.id] = s
+      } else {
+        var s = Session(
+          id: d.id,
+          source: .codex,
+          pid: 0,
+          cwd: d.cwd,
+          status: d.status,
+          lastTool: nil,
+          lastActivity: d.lastActivity,
+          startedAt: d.lastActivity
+        )
+        s.fileDiscovered = true
+        s.transcriptPath = d.transcriptPath
+        sessions[d.id] = s
+      }
+    }
   }
 
   /// Remove a session from the table (user "archive"/dismiss from the UI).
