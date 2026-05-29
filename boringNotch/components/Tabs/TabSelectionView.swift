@@ -25,18 +25,16 @@ struct TabSelectionView: View {
     @ObservedObject var agentManager = AgentMonitorManager.shared
     @Namespace var animation
 
-    /// Home + Shelf always; the Claude / Codex tabs appear only while that
-    /// agent has live sessions, so the split reads at a glance and neither tab
-    /// clutters the bar when unused.
+    /// Home + Shelf always. The Claude and Codex tabs are peers: whenever any
+    /// agent session is live, BOTH show (each may be empty) so Codex is always
+    /// present alongside Claude — not conditionally hidden per-source.
     private var visibleTabs: [TabModel] {
         var t: [TabModel] = [
             TabModel(label: "Home", icon: "house.fill", view: .home),
             TabModel(label: "Shelf", icon: "tray.fill", view: .shelf),
         ]
-        if agentManager.hasSessions(source: .claude) {
+        if agentManager.hasActiveSessions {
             t.append(TabModel(label: "Claude", icon: "terminal.fill", view: .agents))
-        }
-        if agentManager.hasSessions(source: .codex) {
             t.append(TabModel(label: "Codex", icon: "chevron.left.forwardslash.chevron.right", view: .codex))
         }
         return t

@@ -61,9 +61,9 @@ struct AgentsSettings: View {
         Text("Notifications")
       } footer: {
         HelpText(
-          "\"Need input\" fires when Claude asks for permission or input; \"finished\" "
-            + "fires each time it stops outputting. macOS asks for notification "
-            + "permission on first launch.")
+          "Applies to both Claude Code and Codex. \"Need input\" fires when the agent "
+            + "asks for permission or input; \"finished\" fires each time it stops "
+            + "outputting. macOS asks for notification permission on first launch.")
       }
 
       Section {
@@ -84,12 +84,14 @@ struct AgentsSettings: View {
         Text("Interactive Permissions")
       } footer: {
         HelpText(
-          "When ON, a permission prompt shows Allow/Deny in the Agents tab and your "
+          "Applies to Claude Code and Codex CLI (both expose a PermissionRequest hook). "
+            + "When ON, a permission prompt shows Allow/Deny in the agent tab and your "
             + "choice authorizes (or blocks) the tool — the notch's Allow button is a "
             + "real permission control. When OFF (default), the app only shows "
-            + "\"need input\" and Claude Code's normal terminal prompt still applies. "
+            + "\"need input\" and the agent's normal terminal prompt still applies. "
             + "If you don't decide within the timeout — or the app isn't running — the "
-            + "request always defers to the terminal prompt. It never auto-approves.")
+            + "request always defers to the terminal prompt. It never auto-approves. "
+            + "(Codex Desktop is observe-only — it approves in its own UI.)")
       }
 
       Section {

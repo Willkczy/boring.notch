@@ -445,11 +445,13 @@ struct ContentView: View {
                 // If the selected agent tab loses all its sessions (e.g. its tab
                 // chip disappears), fall back to the other agent tab or Home so
                 // the user isn't stranded on a hidden tab.
+                // Claude + Codex tabs appear together while any agent session is
+                // live (either may be empty). Only fall back to Home when there
+                // are no agent sessions at all (both tabs gone).
                 .onChange(of: agentManager.sessions.count) { _, _ in
-                    if coordinator.currentView == .agents, !agentManager.hasSessions(source: .claude) {
-                        coordinator.currentView = agentManager.hasSessions(source: .codex) ? .codex : .home
-                    } else if coordinator.currentView == .codex, !agentManager.hasSessions(source: .codex) {
-                        coordinator.currentView = agentManager.hasSessions(source: .claude) ? .agents : .home
+                    if (coordinator.currentView == .agents || coordinator.currentView == .codex),
+                       !agentManager.hasActiveSessions {
+                        coordinator.currentView = .home
                     }
                 }
             }
