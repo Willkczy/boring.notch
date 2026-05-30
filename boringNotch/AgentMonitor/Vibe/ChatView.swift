@@ -409,6 +409,7 @@ struct ChatView: View {
         ChatApprovalBar(
             tool: tool,
             toolInput: session.pendingToolInput,
+            permissionContext: session.phase.permissionContext,
             onApprove: { approvePermission() },
             onDeny: { denyPermission() }
         )
@@ -1096,10 +1097,15 @@ struct ChatInteractivePromptBar: View {
 
 // MARK: - Chat Approval Bar
 
-/// Approval bar for the chat view with animated buttons
+/// Approval bar for the chat view with animated buttons. When a full
+/// PermissionContext is available, renders every tool_input field in a
+/// scrollable block (so multi-line Bash / Edit content is visible without
+/// switching to the terminal). Falls back to the single-string preview when
+/// only that is available.
 struct ChatApprovalBar: View {
     let tool: String
     let toolInput: String?
+    let permissionContext: PermissionContext?
     let onApprove: () -> Void
     let onDeny: () -> Void
 
@@ -1108,24 +1114,37 @@ struct ChatApprovalBar: View {
     @State private var showDenyButton = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(MCPToolFormatter.formatToolName(tool))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundColor(TerminalColors.amber)
-                if let input = toolInput {
-                    Text(input)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.55))
-                        .lineLimit(3)
-                        .truncationMode(.tail)
-                        .fixedSize(horizontal: false, vertical: true)
+        VStack(spacing: 8) {
+            // Full per-tool fields when we have the context (always, post-H1).
+            if let ctx = permissionContext {
+                ScrollView(.vertical, showsIndicators: true) {
+                    PermissionFieldStack(context: ctx)
+                        .padding(.vertical, 4)
                 }
+                .frame(maxHeight: 160)
+                .opacity(showContent ? 1 : 0)
             }
-            .opacity(showContent ? 1 : 0)
-            .offset(x: showContent ? 0 : -10)
 
-            Spacer()
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(MCPToolFormatter.formatToolName(tool))
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(TerminalColors.amber)
+                    // Inline single-line summary as a quick reference, only when
+                    // the rich block above isn't shown.
+                    if permissionContext == nil, let input = toolInput {
+                        Text(input)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.55))
+                            .lineLimit(3)
+                            .truncationMode(.tail)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .opacity(showContent ? 1 : 0)
+                .offset(x: showContent ? 0 : -10)
+
+                Spacer()
 
             // Deny button
             Button {
@@ -1158,8 +1177,9 @@ struct ChatApprovalBar: View {
             .buttonStyle(.plain)
             .opacity(showAllowButton ? 1 : 0)
             .scaleEffect(showAllowButton ? 1 : 0.8)
+            }
+            .frame(minHeight: 44)
         }
-        .frame(minHeight: 44)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Color.black.opacity(0.2))

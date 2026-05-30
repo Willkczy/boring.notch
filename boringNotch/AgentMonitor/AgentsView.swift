@@ -24,6 +24,17 @@ struct AgentsView: View {
   /// When set (and the session still exists), show its transcript instead of
   /// the list (F2).
   @State private var expandedSessionId: String?
+  /// When set, show the permission detail card for this session (H3) — full
+  /// tool_input + Allow/Deny without leaving the notch. Auto-clears when the
+  /// session is no longer in `.waitingForApproval` (user resolved it, the
+  /// agent moved on, or the prompt timed out).
+  @State private var permissionDetailId: String?
+
+  /// True iff EITHER the chat or the permission detail card is open. Drives
+  /// the notch-grow + suppress-close lifecycle.
+  private var isAnyDetailOpen: Bool {
+    expandedSessionId != nil || permissionDetailId != nil
+  }
 
   var body: some View {
     Group {
@@ -39,19 +50,46 @@ struct AgentsView: View {
           onBack: { expandedSessionId = nil },
           onFocus: { focusSession(state) }
         )
+      } else if let id = permissionDetailId,
+        let state = sessionMonitor.instances.first(where: { $0.sessionId == id && $0.source == source })
+      {
+        PermissionDetailView(
+          session: state,
+          onAllow: {
+            sessionMonitor.approvePermission(sessionId: id)
+            permissionDetailId = nil
+          },
+          onDeny: {
+            sessionMonitor.denyPermission(sessionId: id, reason: nil)
+            permissionDetailId = nil
+          },
+          onBack: { permissionDetailId = nil }
+        )
       } else {
         ClaudeInstancesView(
           sessionMonitor: sessionMonitor,
           onOpenChat: { expandedSessionId = $0.sessionId },
           onFocus: { focusSession($0) },
           canFocus: { canFocus($0) },
+          onOpenPermissionDetail: { permissionDetailId = $0.sessionId },
           sourceFilter: source
         )
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .onAppear { updateExpansion(expandedSessionId != nil) }
-    .onChange(of: expandedSessionId) { updateExpansion(expandedSessionId != nil) }
+    .onAppear { updateExpansion(isAnyDetailOpen) }
+    .onChange(of: expandedSessionId) { updateExpansion(isAnyDetailOpen) }
+    .onChange(of: permissionDetailId) { updateExpansion(isAnyDetailOpen) }
+    // Auto-close the detail card when the session is no longer awaiting
+    // approval (resolved / moved on / timed out) so the user isn't stranded.
+    .onChange(of: sessionMonitor.instances.map { "\($0.sessionId):\($0.phase.isWaitingForApproval)" }) {
+      if let id = permissionDetailId,
+        let state = sessionMonitor.instances.first(where: { $0.sessionId == id }),
+        !state.phase.isWaitingForApproval
+      {
+        permissionDetailId = nil
+      }
+    }
     .onDisappear { updateExpansion(false) }
   }
 

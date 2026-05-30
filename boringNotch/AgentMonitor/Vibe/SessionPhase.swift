@@ -123,6 +123,13 @@ enum SessionPhase: Sendable {
         }
         return nil
     }
+
+    /// Extract the full PermissionContext if waiting for approval (used by the
+    /// permission detail view to render every tool_input field).
+    var permissionContext: PermissionContext? {
+        if case .waitingForApproval(let ctx) = self { return ctx }
+        return nil
+    }
 }
 
 // MARK: - Equatable

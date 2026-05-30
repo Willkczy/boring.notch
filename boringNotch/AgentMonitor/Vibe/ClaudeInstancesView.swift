@@ -23,6 +23,10 @@ struct ClaudeInstancesView: View {
     var onFocus: (SessionState) -> Void
     /// Whether this session can be focused (drives the focus/terminal buttons).
     var canFocus: (SessionState) -> Bool
+    /// Open the dedicated permission detail card for a session whose phase is
+    /// `.waitingForApproval` (H3). Lets the user see the full tool_input
+    /// without switching to the terminal.
+    var onOpenPermissionDetail: (SessionState) -> Void = { _ in }
     /// Show only sessions from this source (nil = all). Splits Claude vs Codex tabs.
     var sourceFilter: EventSource? = nil
 
@@ -91,7 +95,8 @@ struct ClaudeInstancesView: View {
                         onChat: { onOpenChat(session) },
                         onArchive: { archiveSession(session) },
                         onApprove: { approveSession(session) },
-                        onReject: { rejectSession(session) }
+                        onReject: { rejectSession(session) },
+                        onPermissionDetail: { onOpenPermissionDetail(session) }
                     )
                     .id(session.stableId)
                 }
@@ -126,6 +131,9 @@ struct InstanceRow: View {
     let onArchive: () -> Void
     let onApprove: () -> Void
     let onReject: () -> Void
+    /// Tap the row (when awaiting approval) to open the full-context detail
+    /// card. Outside approval state, row tap still focuses the host app.
+    let onPermissionDetail: () -> Void
 
     @State private var isHovered = false
     @State private var spinnerPhase = 0
@@ -302,12 +310,17 @@ struct InstanceRow: View {
         .padding(.trailing, 14)
         .padding(.vertical, 10)
         .contentShape(Rectangle())
-        // Single-tap the row → focus the session's terminal/app (boringNotch's
-        // tap-to-focus behavior). Chat opens via the 💬 icon; the buttons
-        // (chat/eye/allow/deny/archive) consume their own taps so they win over
-        // this row gesture.
+        // Single-tap the row → focus the session's terminal/app. EXCEPTION:
+        // when awaiting approval, tap opens the permission detail card (H3) so
+        // the user can see the full tool_input without leaving the notch.
+        // Chat opens via the 💬 icon; the inline buttons consume their own
+        // taps so they win over this row gesture.
         .onTapGesture {
-            onFocus()
+            if isWaitingForApproval {
+                onPermissionDetail()
+            } else {
+                onFocus()
+            }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isWaitingForApproval)
         .background(
