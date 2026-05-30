@@ -68,7 +68,7 @@ jq --arg bridge "$INSTALL_TARGET" '
 
   # Variant with a timeout (seconds). PermissionRequest BLOCKS waiting for an
   # in-notch decision, so its hook timeout must exceed the bridge curl timeout
-  # (125s) which in turn exceeds the app decision timeout (default 120s).
+  # (1810s default) which in turn exceeds the app decision timeout (600s default).
   def entryT(name; t): {
     hooks: [{
       type: "command",
@@ -88,7 +88,7 @@ jq --arg bridge "$INSTALL_TARGET" '
   | .hooks.UserPromptSubmit  = (stripNotch(.hooks.UserPromptSubmit)  + [entry("user_prompt")])
   | .hooks.PreToolUse        = (stripNotch(.hooks.PreToolUse)        + [entry("pre_tool")])
   | .hooks.PostToolUse       = (stripNotch(.hooks.PostToolUse)       + [entry("post_tool")])
-  | .hooks.PermissionRequest = (stripNotch(.hooks.PermissionRequest) + [entryT("permission_request"; 130)])
+  | .hooks.PermissionRequest = (stripNotch(.hooks.PermissionRequest) + [entryT("permission_request"; 1820)])
   | .hooks.Notification      = (stripNotch(.hooks.Notification)      + [entry("waiting")])
   | .hooks.Stop              = (stripNotch(.hooks.Stop)              + [entry("stop")])
   | .hooks.SubagentStop      = (stripNotch(.hooks.SubagentStop)      + [entry("subagent_stop")])
@@ -149,7 +149,7 @@ jq --arg bridge "$INSTALL_TARGET" '
   | .hooks.UserPromptSubmit  = (stripNotch(.hooks.UserPromptSubmit)  + [entry("user_prompt")])
   | .hooks.PreToolUse        = (stripNotch(.hooks.PreToolUse)        + [entry("pre_tool")])
   | .hooks.PostToolUse       = (stripNotch(.hooks.PostToolUse)       + [entry("post_tool")])
-  | .hooks.PermissionRequest = (stripNotch(.hooks.PermissionRequest) + [entryT("permission_request"; 130)])
+  | .hooks.PermissionRequest = (stripNotch(.hooks.PermissionRequest) + [entryT("permission_request"; 1820)])
   | .hooks.Stop              = (stripNotch(.hooks.Stop)              + [entry("stop")])
   | .hooks.SubagentStop      = (stripNotch(.hooks.SubagentStop)      + [entry("subagent_stop")])
 ' "$CODEX_HOOKS" > "$TMP"

@@ -75,9 +75,9 @@ struct AgentsSettings: View {
           HStack {
             Text("Decision timeout")
             Spacer()
-            Text("\(Int(decisionTimeout))s").foregroundStyle(.secondary)
+            Text(formatTimeout(decisionTimeout)).foregroundStyle(.secondary)
           }
-          Slider(value: $decisionTimeout, in: 15...120, step: 15)
+          Slider(value: $decisionTimeout, in: 60...1800, step: 60)
         }
         .disabled(!enabled || !interactivePermissions)
       } header: {
@@ -106,5 +106,12 @@ struct AgentsSettings: View {
     }
     .accentColor(.effectiveAccent)
     .navigationTitle("Agents")
+  }
+
+  private func formatTimeout(_ s: Double) -> String {
+    let secs = Int(s)
+    if secs < 60 { return "\(secs)s" }
+    let m = secs / 60, r = secs % 60
+    return r == 0 ? "\(m)m" : "\(m)m \(r)s"
   }
 }

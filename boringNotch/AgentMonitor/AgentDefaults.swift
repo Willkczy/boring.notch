@@ -30,8 +30,11 @@ extension Defaults.Keys {
   /// the notch's Allow button a real authorization control for tool execution.
   static let agentInteractivePermissions = Key<Bool>("agentInteractivePermissions", default: false)
   /// Seconds to wait for an in-notch Allow/Deny before deferring to the terminal
-  /// prompt. Must stay below the bridge's curl timeout (125s).
-  static let agentDecisionTimeout = Key<Double>("agentDecisionTimeout", default: 120)
+  /// prompt. Three caps must rise together: this value, the bridge curl
+  /// `NOTCH_AGENT_DECISION_TIMEOUT` (default 1810), and the hook `timeout` in
+  /// settings.json (1820). Default 600 (10 min) so the Allow/Deny bar persists
+  /// long enough for the user to come back to the notch.
+  static let agentDecisionTimeout = Key<Double>("agentDecisionTimeout", default: 600)
 
   /// Show a small status dot in the closed (collapsed) notch when a session is
   /// live and the notch is otherwise idle (no music/OSD).

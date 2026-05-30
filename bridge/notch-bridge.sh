@@ -129,9 +129,9 @@ fi
 if [ "$EVENT" = "permission_request" ]; then
     # Blocking: wait for the app's Allow/Deny/defer, then emit Claude Code's
     # PermissionRequest decision JSON on stdout. DECISION_TIMEOUT must exceed
-    # the app's own decision timeout (default 120s) so the app responds first;
+    # the app's own decision timeout (default 600s) so the app responds first;
     # if the app is down, curl returns immediately (connection refused).
-    DECISION_TIMEOUT="${NOTCH_AGENT_DECISION_TIMEOUT:-125}"
+    DECISION_TIMEOUT="${NOTCH_AGENT_DECISION_TIMEOUT:-1810}"
     RESP=$(curl -s --max-time "$DECISION_TIMEOUT" \
         -H "Content-Type: application/json" \
         -X POST \
