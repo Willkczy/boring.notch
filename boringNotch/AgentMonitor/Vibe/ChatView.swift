@@ -1115,9 +1115,11 @@ struct ChatApprovalBar: View {
                     .foregroundColor(TerminalColors.amber)
                 if let input = toolInput {
                     Text(input)
-                        .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.5))
-                        .lineLimit(1)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.55))
+                        .lineLimit(3)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .opacity(showContent ? 1 : 0)

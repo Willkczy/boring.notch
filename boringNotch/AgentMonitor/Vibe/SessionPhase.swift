@@ -22,7 +22,7 @@ struct PermissionContext: Sendable {
 
         // For Bash, prioritize showing the command
         if toolName == "Bash", let command = input["command"]?.value as? String {
-            return command.count > 100 ? String(command.prefix(100)) + "..." : command
+            return Self.cap(command)
         }
 
         // For Write/Edit, show the file path
@@ -39,18 +39,23 @@ struct PermissionContext: Sendable {
         let priorityKeys = ["command", "file_path", "path", "query", "pattern", "url"]
         for key in priorityKeys {
             if let value = input[key]?.value as? String {
-                return value.count > 100 ? String(value.prefix(100)) + "..." : value
+                return Self.cap(value)
             }
         }
 
         // Fallback: first non-description string
         for (key, value) in input where key != "description" {
             if let str = value.value as? String {
-                return str.count > 100 ? String(str.prefix(100)) + "..." : str
+                return Self.cap(str)
             }
         }
 
         return nil
+    }
+
+    /// 500-char cap for the row preview. Detail view shows the full value.
+    private static func cap(_ s: String) -> String {
+        s.count > 500 ? String(s.prefix(500)) + "…" : s
     }
 }
 

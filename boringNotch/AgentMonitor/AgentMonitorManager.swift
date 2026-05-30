@@ -54,6 +54,10 @@ final class AgentMonitorManager: ObservableObject {
     let sessionKey: String
     let tool: String?
     let inputSummary: String?
+    /// Full `tool_input` flattened to string values so the detail view can show
+    /// every field (Bash command, Edit old/new, Write content, …). Nested
+    /// objects / arrays are JSON-stringified.
+    let toolInput: [String: String]
   }
   @Published private(set) var pendingPrompts: [PendingPrompt] = []
 
@@ -364,7 +368,7 @@ final class AgentMonitorManager: ObservableObject {
   /// terminal permission prompt applies. We NEVER auto-allow.
   func requestPermissionDecision(event: Event, id: String) async -> PermissionDecision {
     let key = sessionKey(for: event)
-    let (tool, inputSummary) = Self.permissionDetails(from: event.payload)
+    let (tool, inputSummary, toolInput) = Self.permissionDetails(from: event.payload)
 
     var s = adoptedSession(key: key, event: event)
     if let tool { s.lastTool = tool }
@@ -384,7 +388,8 @@ final class AgentMonitorManager: ObservableObject {
     emitAlert(for: s)
 
     pendingPrompts.append(
-      PendingPrompt(id: id, sessionKey: key, tool: tool, inputSummary: inputSummary))
+      PendingPrompt(
+        id: id, sessionKey: key, tool: tool, inputSummary: inputSummary, toolInput: toolInput))
     logger.debug(
       "permission pending (interactive): \(key, privacy: .public) tool=\(tool ?? "?", privacy: .public)")
 
@@ -432,19 +437,43 @@ final class AgentMonitorManager: ObservableObject {
     for id in ids { resolvePermission(id: id, decision: .deferred) }
   }
 
-  /// Pull a tool name and a short input summary out of a PermissionRequest
-  /// payload for display (best-effort).
-  private static func permissionDetails(from payload: JSONValue) -> (tool: String?, input: String?) {
-    guard case .object(let obj) = payload else { return (nil, nil) }
+  /// Pull a tool name, a short single-field summary (for the row preview), and
+  /// the FULL `tool_input` flattened to a string dict (for the detail view) out
+  /// of a PermissionRequest payload. Nested objects / arrays are
+  /// JSON-stringified so the detail view can still show them as text.
+  private static func permissionDetails(from payload: JSONValue)
+    -> (tool: String?, input: String?, toolInput: [String: String])
+  {
+    guard case .object(let obj) = payload else { return (nil, nil, [:]) }
     var tool: String?
     if case .string(let t) = obj["tool_name"] { tool = t }
     var input: String?
+    var full: [String: String] = [:]
     if case .object(let inObj) = obj["tool_input"] {
+      for (k, v) in inObj { full[k] = stringify(v) }
       if case .string(let c) = inObj["command"] { input = c }
       else if case .string(let f) = inObj["file_path"] { input = f }
       else if case .string(let p) = inObj["path"] { input = p }
     }
-    return (tool, input)
+    return (tool, input, full)
+  }
+
+  /// Coerce a JSONValue into a display string. Primitives become their literal
+  /// form; objects/arrays JSON-pretty-printed (best-effort).
+  private static func stringify(_ value: JSONValue) -> String {
+    switch value {
+    case .null: return ""
+    case .bool(let b): return b ? "true" : "false"
+    case .number(let n): return n.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(n)) : String(n)
+    case .string(let s): return s
+    case .array, .object:
+      if let data = try? JSONEncoder().encode(value),
+        let s = String(data: data, encoding: .utf8)
+      {
+        return s
+      }
+      return ""
+    }
   }
 
   // MARK: - Private

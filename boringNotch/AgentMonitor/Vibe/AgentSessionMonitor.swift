@@ -125,11 +125,16 @@ final class AgentSessionMonitor: ObservableObject {
             return .processing
         case .needInput:
             if let prompt {
-                // Reconstruct a PermissionContext the vibe row can render. We
-                // stash the input summary under "command" so PermissionContext's
-                // formattedInput surfaces it for any tool.
-                let toolInput: [String: AnyCodable]? = prompt.inputSummary.map {
-                    ["command": AnyCodable($0)]
+                // Carry the FULL tool_input dict so the detail view can show
+                // every field (Bash command body, Edit old/new, Write content,
+                // …). Falls back to a single-field synthetic dict keyed under
+                // "command" when only inputSummary is available — keeps
+                // formattedInput working for the row preview.
+                var toolInput: [String: AnyCodable]? = nil
+                if !prompt.toolInput.isEmpty {
+                    toolInput = prompt.toolInput.mapValues { AnyCodable($0) }
+                } else if let summary = prompt.inputSummary {
+                    toolInput = ["command": AnyCodable(summary)]
                 }
                 return .waitingForApproval(
                     PermissionContext(

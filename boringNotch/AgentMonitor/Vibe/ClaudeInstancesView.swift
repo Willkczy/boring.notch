@@ -187,7 +187,7 @@ struct InstanceRow: View {
 
                 // Show tool call when waiting for approval, otherwise last activity
                 if isWaitingForApproval, let toolName = session.pendingToolName {
-                    HStack(spacing: 4) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(MCPToolFormatter.formatToolName(toolName))
                             .font(.system(size: 11, weight: .medium, design: .monospaced))
                             .foregroundColor(TerminalColors.amber.opacity(0.9))
@@ -198,9 +198,11 @@ struct InstanceRow: View {
                                 .lineLimit(1)
                         } else if let input = session.pendingToolInput {
                             Text(input)
-                                .font(.system(size: 11))
-                                .foregroundColor(.white.opacity(0.5))
-                                .lineLimit(1)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.55))
+                                .lineLimit(3)
+                                .truncationMode(.tail)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 } else if let role = session.lastMessageRole {
