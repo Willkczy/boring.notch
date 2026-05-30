@@ -33,7 +33,13 @@ final class CodexSessionWatcher {
     private let pollInterval: TimeInterval = 10
     /// A rollout counts as "active" while its file was modified within this
     /// window. Past that it drops off the tab (Desktop has no end event).
-    private let activeWindow: TimeInterval = 15 * 60
+    /// 5 min keeps the tab focused on what's actually in use — Desktop rewrites
+    /// the rollout each turn, so anything older is genuinely idle.
+    private let activeWindow: TimeInterval = 5 * 60
+    /// A session counts as "working" when its rollout was just written. Past
+    /// this it flips to `.tempDone` (turn finished, waiting). Bridges the gap
+    /// where Desktop doesn't reliably emit `task_started`/`task_complete`.
+    private let workingFreshness: TimeInterval = 60
 
     private var timer: Timer?
 
@@ -54,8 +60,9 @@ final class CodexSessionWatcher {
 
     private func poll() {
         let window = activeWindow
+        let fresh = workingFreshness
         Task.detached(priority: .utility) {
-            let discovered = Self.scan(activeWindow: window)
+            let discovered = Self.scan(activeWindow: window, workingFreshness: fresh)
             await MainActor.run {
                 AgentMonitorManager.shared.applyDiscoveredCodexSessions(discovered)
             }
@@ -74,7 +81,9 @@ final class CodexSessionWatcher {
     }
 
     /// Scan today's + yesterday's date dirs for recently-modified rollouts.
-    nonisolated static func scan(activeWindow: TimeInterval) -> [DiscoveredCodexSession] {
+    nonisolated static func scan(
+        activeWindow: TimeInterval, workingFreshness: TimeInterval
+    ) -> [DiscoveredCodexSession] {
         let fm = FileManager.default
         let base = sessionsDir
         let now = Date()
@@ -95,7 +104,7 @@ final class CodexSessionWatcher {
             for file in files where file.pathExtension == "jsonl" && file.lastPathComponent.hasPrefix("rollout-") {
                 guard let mod = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
                       mod >= cutoff else { continue }
-                if let session = parse(file: file, mtime: mod) {
+                if let session = parse(file: file, mtime: mod, now: now, workingFreshness: workingFreshness) {
                     out.append(session)
                 }
             }
@@ -104,9 +113,12 @@ final class CodexSessionWatcher {
     }
 
     /// Read a rollout's session_meta (id/cwd/originator) and derive coarse status
-    /// from its task_started / task_complete events. Skips CLI ("codex-tui")
-    /// sessions — hooks own those.
-    nonisolated private static func parse(file: URL, mtime: Date) -> DiscoveredCodexSession? {
+    /// from its task_started / task_complete events when present, falling back
+    /// to write-freshness (Desktop doesn't always emit task lifecycle events).
+    /// Skips CLI ("codex-tui") and Desktop scratch sessions with no project cwd.
+    nonisolated private static func parse(
+        file: URL, mtime: Date, now: Date, workingFreshness: TimeInterval
+    ) -> DiscoveredCodexSession? {
         guard let data = FileManager.default.contents(atPath: file.path),
               let text = String(data: data, encoding: .utf8) else { return nil }
 
@@ -115,6 +127,7 @@ final class CodexSessionWatcher {
         var originator = ""
         var lastTaskWasComplete = false
         var sawTask = false
+        var sawUserMessage = false
 
         for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
             guard let d = line.data(using: .utf8),
@@ -137,6 +150,14 @@ final class CodexSessionWatcher {
                 default:
                     break
                 }
+            case "response_item":
+                // A scratch session with only `session_meta` and no user prompt
+                // is empty noise — surface only sessions where the user actually
+                // typed something.
+                if payload["type"] as? String == "message",
+                   payload["role"] as? String == "user" {
+                    sawUserMessage = true
+                }
             default:
                 break
             }
@@ -145,9 +166,23 @@ final class CodexSessionWatcher {
         guard let id, !id.isEmpty else { return nil }
         // CLI sessions go through hooks; only surface Desktop / other GUI here.
         if originator == "codex-tui" { return nil }
+        // Desktop scratch (no project) — cwd "/" or empty → nothing to focus,
+        // nothing meaningful to show. Drop.
+        let trimmedCwd = cwd.trimmingCharacters(in: .whitespaces)
+        if trimmedCwd.isEmpty || trimmedCwd == "/" { return nil }
+        // Empty rollout — opened, nothing typed.
+        if !sawUserMessage { return nil }
 
-        // Coarse status: complete → temp-done; an open task or no task yet → working.
-        let status: SessionStatus = (sawTask && lastTaskWasComplete) ? .tempDone : .working
+        // Status:
+        //   task_started seen, no matching task_complete → working
+        //   task_complete seen → tempDone
+        //   no task events (Desktop often) → freshness fallback on mtime
+        let status: SessionStatus
+        if sawTask {
+            status = lastTaskWasComplete ? .tempDone : .working
+        } else {
+            status = (now.timeIntervalSince(mtime) <= workingFreshness) ? .working : .tempDone
+        }
 
         return DiscoveredCodexSession(
             id: id,
